@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pirate Islands</title>
+<style>
+  body { font: 17px/1.4 system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 16px; background: #f4efe3; color: #222; }
+  h1 { margin: 0 0 12px; } h2 { margin: 16px 0 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .card { flex: 1; min-width: 70px; background: #fff; border: 2px solid #c9b78f; border-radius: 10px; padding: 8px; text-align: center; }
+  .card b { display: block; font-size: 26px; }
+  button { font: inherit; padding: 10px 16px; border: 0; border-radius: 8px; background: #1d5c7a; color: #fff; cursor: pointer; margin: 4px 0; }
+  button.big { width: 100%; font-size: 20px; padding: 16px; }
+  button.card { color: #222; } button.sel { border-color: #1d5c7a; background: #d7ecf5; }
+  .cover { background: #1d3b4a; color: #fff; border-radius: 12px; padding: 32px 16px; text-align: center; }
+  .raid { color: #1a7f37; } .crash { color: #b42318; } .empty { color: #777; }
+  .muted { color: #666; font-size: 15px; }
+  table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid #ddd; padding: 4px; text-align: center; }
+  input { font: inherit; padding: 8px; width: 100%; box-sizing: border-box; margin: 3px 0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ---- Rules: change these numbers to try a variant ----
+const RULES = {
+  startTreasure: 3, // coins on every island at setup
+  raidLeaves: 1,    // a solo raid takes everything, then leaves this many
+  growth: 1,        // a crashed or unvisited island gains this many
+  winAt: 10,        // checked after each round; highest total wins, equal top totals share
+  minPlayers: 3, maxPlayers: 5,
+};
+const LETTERS = 'ABCDE';
+
+let S = null; // game state; null = setup screen
+let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'] };
+
+function newGame(names) {
+  S = { players: names.map(name => ({ name, score: 0 })), islands: names.map(() => RULES.startTreasure),
+        round: 1, turn: 0, picks: [], sel: null, phase: 'pass', history: [], winners: null, maxIsland: RULES.startTreasure };
+}
+
+// Resolve one round. picks[p] = island index chosen by player p.
+function resolve(picks) {
+  const results = S.islands.map((coins, i) => {
+    const who = picks.flatMap((isl, p) => (isl === i ? [p] : []));
+    if (who.length === 1) {
+      S.players[who[0]].score += coins;
+      S.islands[i] = RULES.raidLeaves;
+      return { kind: 'raid', who, coins, after: S.islands[i] };
+    }
+    S.islands[i] = coins + RULES.growth;
+    return { kind: who.length ? 'crash' : 'empty', who, coins, after: S.islands[i] };
+  });
+  S.maxIsland = Math.max(S.maxIsland, ...S.islands);
+  S.history.push({ round: S.round, picks: [...picks], results });
+  const top = Math.max(...S.players.map(p => p.score));
+  if (top >= RULES.winAt) S.winners = S.players.filter(p => p.score === top);
+  return results;
+}
+
+// ---- Actions (called from buttons) ----
+const act = {
+  count(n) { setup.count = n; render(); },
+  name(i, v) { setup.names[i] = v; },
+  start() { newGame(setup.names.slice(0, setup.count).map((n, i) => n.trim() || `Player ${i + 1}`)); render(); },
+  show() { S.phase = 'pick'; S.sel = null; render(); },
+  choose(i) { S.sel = i; render(); },
+  lock() {
+    S.picks.push(S.sel); S.turn++;
+    if (S.turn < S.players.length) S.phase = 'pass';
+    else { resolve(S.picks); S.phase = 'reveal'; }
+    render();
+  },
+  next() {
+    if (S.winners) S.phase = 'end';
+    else Object.assign(S, { round: S.round + 1, turn: 0, picks: [], phase: 'pass' });
+    render();
+  },
+  again() { S = null; render(); },
+};
+
+// ---- Views ----
+const L = i => LETTERS[i];
+const names = who => who.map(p => S.players[p].name).join(' & ');
+
+function board() {
+  const last = S.history.at(-1);
+  return `<div class="row">${S.islands.map((c, i) => `<div class="card">Island ${L(i)}<b>${c}</b>coins</div>`).join('')}</div>
+    <div class="row">${S.players.map(p => `<div class="card">${p.name}<b>${p.score}</b></div>`).join('')}</div>
+    <p class="muted">Round ${S.round} · first to ${RULES.winAt} coins wins${last && S.phase !== 'reveal'
+      ? ` · last round: ${last.picks.map((isl, p) => `${S.players[p].name}→${L(isl)}`).join(', ')}` : ''}</p>`;
+}
+
+function resultLine(r, i) {
+  if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone, +${r.coins} coin${r.coins === 1 ? '' : 's'}! (${r.after} left)</p>`;
+  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. Nobody scores. (${r.coins} → ${r.after})</p>`;
+  return `<p class="empty"><b>${L(i)}:</b> Nobody came. (${r.coins} → ${r.after})</p>`;
+}
+
+const views = {
+  pass: () => `<div class="cover"><p>Round ${S.round}: pass the device to</p><h2>${S.players[S.turn].name}</h2>
+    <p>Everyone else, look away!</p><button class="big" onclick="act.show()">I'm ${S.players[S.turn].name}, show islands</button></div>`,
+  pick: () => `<h2>${S.players[S.turn].name}, choose an island</h2>
+    <div class="row">${S.islands.map((c, i) => `<button class="card ${S.sel === i ? 'sel' : ''}" onclick="act.choose(${i})">${L(i)}<b>${c}</b></button>`).join('')}</div>
+    <button class="big" ${S.sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${S.sel === null ? '' : ` Island ${L(S.sel)}`}</button>`,
+  reveal: () => `<h2>Reveal!</h2>
+    <p>${S.picks.map((isl, p) => `<b>${S.players[p].name}</b> → ${L(isl)}`).join(' · ')}</p>
+    ${S.history.at(-1).results.map(resultLine).join('')}
+    <button class="big" onclick="act.next()">${S.winners ? 'See who won' : 'Next round'}</button>`,
+  end: () => {
+    const all = S.history.flatMap(h => h.results);
+    return `<h2>🏆 ${S.winners.map(p => p.name).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'} with ${S.winners[0].score} coins!</h2>
+    <p>Rounds: <b>${S.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
+       Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b></p>
+    <table><tr><th>Round</th>${S.players.map(p => `<th>${p.name}</th>`).join('')}<th>Islands after</th></tr>
+    ${S.history.map(h => `<tr><td>${h.round}</td>${h.picks.map((isl, p) => {
+      const r = h.results[isl];
+      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${r.coins}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
+    }).join('')}<td>${h.results.map((r, i) => `${L(i)}${r.after}`).join(' ')}</td></tr>`).join('')}</table>
+    <button class="big" onclick="act.again()">New game</button>`;
+  },
+};
+
+function setupView() {
+  return `<h1>🏴‍☠️ Pirate Islands</h1><p>Secretly pick an island. Alone? Take all its treasure (it keeps ${RULES.raidLeaves}).
+    Anyone else there? Crash: nobody scores. Untaken islands grow by ${RULES.growth}. First to ${RULES.winAt} coins wins.</p>
+    <h2>Players</h2><div class="row">${[...Array(RULES.maxPlayers - RULES.minPlayers + 1)].map((_, k) => {
+      const n = RULES.minPlayers + k;
+      return `<button class="card ${setup.count === n ? 'sel' : ''}" onclick="act.count(${n})">${n}</button>`;
+    }).join('')}</div>
+    ${setup.names.slice(0, setup.count).map((n, i) => `<input value="${n}" oninput="act.name(${i}, this.value)">`).join('')}
+    <button class="big" onclick="act.start()">Set sail</button>`;
+}
+
+function render() {
+  document.getElementById('app').innerHTML = S ? `<h1>🏴‍☠️ Pirate Islands</h1>${board()}${views[S.phase]()}` : setupView();
+}
+render();
+</script>
+</body>
+</html>
