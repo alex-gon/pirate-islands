@@ -31,14 +31,45 @@ const RULES = {
   winAt: 10,        // checked after each round; highest total wins, equal top totals share
   minPlayers: 3, maxPlayers: 5,
 };
+// ---- Bots: tuning for computer seats. A bot reads only public info: treasure, scores, past picks ----
+const BOTS = {
+  habit: 0.5, // a bot expects each rival to lean toward rich islands, plus this extra pull toward their last pick
+  personalities: [ // greed: how much a bigger pile beats a safer one · focus: higher = sticks to its best guess, lower = more random
+    { name: 'Greedy', greed: 1.5, focus: 3 },
+    { name: 'Sneaky', greed: 0.75, focus: 3 },
+    { name: 'Wild', greed: 1, focus: 1 },
+  ],
+};
 const LETTERS = 'ABCDE';
 
 let S = null; // game state; null = setup screen
-let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'] };
+let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'], bots: [null, null, null, null, null], rot: 0 };
 
-function newGame(names) {
-  S = { players: names.map(name => ({ name, score: 0 })), islands: names.map(() => RULES.startTreasure),
+function newGame(names, bots) {
+  S = { players: names.map((name, i) => ({ name, score: 0, bot: BOTS.personalities[bots[i]] || null })), islands: names.map(() => RULES.startTreasure),
         round: 1, turn: 0, picks: [], sel: null, phase: 'pass', history: [], winners: null, maxIsland: RULES.startTreasure };
+  advance();
+}
+
+// Bots pick until the next human's turn; once everyone has picked, resolve. Pass screens only with 2+ humans.
+function advance() {
+  while (S.turn < S.players.length && S.players[S.turn].bot) S.picks[S.turn] = botPick(S.turn++);
+  if (S.turn === S.players.length) { resolve(S.picks); S.phase = 'reveal'; }
+  else S.phase = S.players.filter(p => !p.bot).length > 1 ? 'pass' : 'pick';
+  S.sel = null;
+}
+
+// "Guess the crowd": score each island by (chance I'm there alone) x coins^greed, then pick with weighted randomness.
+function botPick(me) {
+  const { greed, focus } = S.players[me].bot, last = S.history.at(-1)?.picks || [];
+  const lean = S.players.map((_, q) => {
+    const w = S.islands.map((c, i) => c * (last[q] === i ? 1 + BOTS.habit : 1)), total = w.reduce((a, b) => a + b);
+    return w.map(x => x / total);
+  });
+  const weights = S.islands.map((c, i) => (lean.reduce((alone, l, q) => (q === me ? alone : alone * (1 - l[i])), 1) * c ** greed) ** focus);
+  let r = Math.random() * weights.reduce((a, b) => a + b), i = 0;
+  while (r > weights[i] && i < weights.length - 1) r -= weights[i++];
+  return i;
 }
 
 // Resolve one round. picks[p] = island index chosen by player p.
@@ -64,18 +95,14 @@ function resolve(picks) {
 const act = {
   count(n) { setup.count = n; render(); },
   name(i, v) { setup.names[i] = v; },
-  start() { newGame(setup.names.slice(0, setup.count).map((n, i) => n.trim() || `Player ${i + 1}`)); render(); },
+  bot(i) { setup.bots[i] = setup.bots[i] === null ? setup.rot++ % BOTS.personalities.length : null; render(); },
+  start() { newGame(setup.names.slice(0, setup.count).map((n, i) => n.trim() || `Player ${i + 1}`), setup.bots); render(); },
   show() { S.phase = 'pick'; S.sel = null; render(); },
   choose(i) { S.sel = i; render(); },
-  lock() {
-    S.picks.push(S.sel); S.turn++;
-    if (S.turn < S.players.length) S.phase = 'pass';
-    else { resolve(S.picks); S.phase = 'reveal'; }
-    render();
-  },
+  lock() { S.picks[S.turn++] = S.sel; advance(); render(); },
   next() {
     if (S.winners) S.phase = 'end';
-    else Object.assign(S, { round: S.round + 1, turn: 0, picks: [], phase: 'pass' });
+    else { Object.assign(S, { round: S.round + 1, turn: 0, picks: [] }); advance(); }
     render();
   },
   again() { S = null; render(); },
@@ -88,7 +115,7 @@ const names = who => who.map(p => S.players[p].name).join(' & ');
 function board() {
   const last = S.history.at(-1);
   return `<div class="row">${S.islands.map((c, i) => `<div class="card">Island ${L(i)}<b>${c}</b>coins</div>`).join('')}</div>
-    <div class="row">${S.players.map(p => `<div class="card">${p.name}<b>${p.score}</b></div>`).join('')}</div>
+    <div class="row">${S.players.map(p => `<div class="card">${p.name}${p.bot ? ` <span class="muted">🤖 ${p.bot.name}</span>` : ''}<b>${p.score}</b></div>`).join('')}</div>
     <p class="muted">Round ${S.round} · first to ${RULES.winAt} coins wins${last && S.phase !== 'reveal'
       ? ` · last round: ${last.picks.map((isl, p) => `${S.players[p].name}→${L(isl)}`).join(', ')}` : ''}</p>`;
 }
@@ -130,7 +157,8 @@ function setupView() {
       const n = RULES.minPlayers + k;
       return `<button class="card ${setup.count === n ? 'sel' : ''}" onclick="act.count(${n})">${n}</button>`;
     }).join('')}</div>
-    ${setup.names.slice(0, setup.count).map((n, i) => `<input value="${n}" oninput="act.name(${i}, this.value)">`).join('')}
+    ${setup.names.slice(0, setup.count).map((n, i) => `<div class="row"><input style="flex: 1; width: auto" value="${n}" oninput="act.name(${i}, this.value)">
+      <button onclick="act.bot(${i})">${setup.bots[i] === null ? '🙂 Human' : `🤖 ${BOTS.personalities[setup.bots[i]].name}`}</button></div>`).join('')}
     <button class="big" onclick="act.start()">Set sail</button>`;
 }
 
