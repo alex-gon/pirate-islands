@@ -10,6 +10,7 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
   .card { flex: 1; min-width: 70px; background: #fff; border: 2px solid #c9b78f; border-radius: 10px; padding: 8px; text-align: center; }
   .card b { display: block; font-size: 26px; }
+  .t { display: inline-block; min-width: 1.4em; margin: 2px; padding: 0 4px; border: 1px solid #0005; border-radius: 9px; font-weight: bold; font-size: 15px; }
   button { font: inherit; padding: 10px 16px; border: 0; border-radius: 8px; background: #1d5c7a; color: #fff; cursor: pointer; margin: 4px 0; }
   button.big { width: 100%; font-size: 20px; padding: 16px; }
   button.card { color: #222; } button.sel { border-color: #1d5c7a; background: #d7ecf5; }
@@ -25,15 +26,22 @@
 <script>
 // ---- Rules: change these numbers to try a variant ----
 const RULES = {
-  startTreasure: 3, // coins on every island at setup
-  raidLeaves: 1,    // a solo raid takes everything, then leaves this many
-  growth: 1,        // a crashed or unvisited island gains this many
-  winAt: 10,        // checked after each round; highest total wins, equal top totals share
+  treasure: [ // the colours; mark is the letter on each token so colour isn't the only cue
+    { name: 'Rubies', one: 'Ruby', mark: 'R', ink: '#ef5350' },
+    { name: 'Emeralds', one: 'Emerald', mark: 'E', ink: '#66bb6a' },
+    { name: 'Sapphires', one: 'Sapphire', mark: 'S', ink: '#64b5f6' },
+    { name: 'Gold', one: 'Gold', mark: 'G', ink: '#ffd54f' },
+    { name: 'Pearls', one: 'Pearl', mark: 'P', ink: '#ffffff' },
+  ],
+  perColour: 15, // tokens of each colour in the bag; drawn blind, never returned
+  startPile: 2,  // tokens drawn onto every island at setup
+  refill: 1,     // tokens drawn onto every island that didn't crash; a bag too short to refill them all ends the game
+  winAt: 5,      // of one colour, checked after each round. Ties: most of own best colour → most colours → most pieces → share
   minPlayers: 3, maxPlayers: 5,
 };
-// ---- Bots: tuning for computer seats. A bot reads only public info: treasure, scores, past picks ----
+// ---- Bots: tuning for computer seats. A bot reads only public info: piles, hauls, last round's picks ----
 const BOTS = {
-  habit: 0.5,   // a bot expects each rival to lean toward rich islands, plus this extra pull toward their last pick
+  habit: 0.5,   // a bot expects each rival to lean toward big piles, plus this extra pull toward their last pick
   canny: 0.5,   // share of rivals the bot expects to also dodge that crowd (0 = all naive, 1 = all canny)
   winPull: 3,   // how much more an island counts when taking it would win the game
   block: 0.5,   // how much a bot values crashing an island a rival would win on
@@ -46,14 +54,28 @@ const BOTS = {
 };
 const LETTERS = 'ABCDE';
 const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // names are typed by players, so escape before HTML
+const zeros = () => RULES.treasure.map(() => 0); // a pile, haul or bag: one count per colour
+const total = a => a.reduce((x, y) => x + y, 0);
 
 let S = null; // game state; null = setup screen
 let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'], bots: [null, null, null, null, null], rot: 0 };
 
 function newGame(names, bots) {
-  S = { players: names.map((name, i) => ({ name: esc(name), score: 0, bot: BOTS.personalities[bots[i]] || null })), islands: names.map(() => RULES.startTreasure),
-        round: 1, turn: 0, picks: [], sel: null, phase: 'pass', history: [], winners: null, maxIsland: RULES.startTreasure };
+  S = { players: names.map((name, i) => ({ name: esc(name), haul: zeros(), bot: BOTS.personalities[bots[i]] || null })),
+        bag: RULES.treasure.map(() => RULES.perColour), round: 1, turn: 0, picks: [], sel: null, phase: 'pass', history: [], winners: null };
+  S.islands = names.map(() => draw(zeros(), RULES.startPile));
+  S.maxIsland = RULES.startPile;
   advance();
+}
+
+// Draw n tokens blind from the bag onto a pile.
+function draw(pile, n) {
+  for (let k = 0; k < n; k++) {
+    let r = Math.random() * total(S.bag), c = 0;
+    while (r >= S.bag[c]) r -= S.bag[c++];
+    S.bag[c]--; pile[c]++;
+  }
+  return pile;
 }
 
 // Bots pick until the next human's turn; once everyone has picked, resolve. Pass screens only with 2+ humans.
@@ -64,47 +86,53 @@ function advance() {
   S.sel = null;
 }
 
-// "Guess the crowd": predict where each rival goes, score each island by (chance I'm there alone) x coins^greed
+// "Guess the crowd": predict where each rival goes, score each island by (chance I'm there alone) x pile size^greed
 // (more if it wins the game), add the value of blocking a rival's winning island, then pick with weighted randomness.
 function botPick(me) {
   const { greed, focus } = S.players[me].bot, prev = S.history.at(-1), last = prev?.picks || [];
   const crashed = prev?.results[last[me]].kind === 'crash' ? last[me] : -1;
-  const norm = w => { const t = w.reduce((a, b) => a + b); return w.map(x => x / t); };
-  const wins = (q, i) => S.players[q].score + S.islands[i] >= RULES.winAt;
-  const prize = (q, i) => S.islands[i] * (wins(q, i) ? BOTS.winPull : 1);
+  const norm = w => { const t = total(w); return w.map(x => x / t); };
+  const size = i => total(S.islands[i]);
+  const wins = (q, i) => S.islands[i].some((n, c) => S.players[q].haul[c] + n >= RULES.winAt);
+  const prize = (q, i) => size(i) * (wins(q, i) ? BOTS.winPull : 1);
   const alone = (lean, q, i) => lean.reduce((a, l, r) => (r === q ? a : a * (1 - l[i])), 1);
-  // A naive rival chases rich islands, its last pick and its winning island; a canny one also dodges the naive crowd.
+  // A naive rival chases big piles, its last pick and its winning island; a canny one also dodges the naive crowd.
   const naive = S.players.map((_, q) => norm(S.islands.map((_, i) => prize(q, i) * (last[q] === i ? 1 + BOTS.habit : 1))));
   const canny = S.players.map((_, q) => norm(S.islands.map((_, i) => alone(naive, q, i) * prize(q, i))));
   const lean = naive.map((l, q) => l.map((x, i) => (1 - BOTS.canny) * x + BOTS.canny * canny[q][i]));
-  const biggest = Math.max(...S.islands) ** greed;
+  const biggest = Math.max(...S.islands.map((_, i) => size(i))) ** greed;
   const weights = S.islands.map((_, i) => {
     const threat = 1 - lean.reduce((a, l, q) => (q !== me && wins(q, i) ? a * (1 - l[i]) : a), 1);
-    const value = alone(lean, me, i) * S.islands[i] ** greed * (wins(me, i) ? BOTS.winPull : 1) + BOTS.block * threat * biggest;
+    const value = alone(lean, me, i) * size(i) ** greed * (wins(me, i) ? BOTS.winPull : 1) + BOTS.block * threat * biggest;
     return (value * (i === crashed ? BOTS.burned : 1)) ** focus;
   });
-  let r = Math.random() * weights.reduce((a, b) => a + b), i = 0;
+  let r = Math.random() * total(weights), i = 0;
   while (r > weights[i] && i < weights.length - 1) r -= weights[i++];
   return i;
 }
 
-// Resolve one round. picks[p] = island index chosen by player p.
+// The tie order: most of one colour, then most different colours, then most pieces; whoever is level at the top shares.
+function top(players) {
+  const key = p => (Math.max(...p.haul) * 10 + p.haul.filter(Boolean).length) * 100 + total(p.haul);
+  const best = Math.max(...players.map(key));
+  return players.filter(p => key(p) === best);
+}
+
+// Resolve one round: raid, crash or unvisited per island, then check for a winner, then refill. picks[p] = island of player p.
 function resolve(picks) {
-  const results = S.islands.map((coins, i) => {
+  const results = S.islands.map((pile, i) => {
     const who = picks.flatMap((isl, p) => (isl === i ? [p] : []));
-    if (who.length === 1) {
-      S.players[who[0]].score += coins;
-      S.islands[i] = RULES.raidLeaves;
-      return { kind: 'raid', who, coins, after: S.islands[i] };
-    }
-    S.islands[i] = coins + RULES.growth;
-    return { kind: who.length ? 'crash' : 'empty', who, coins, after: S.islands[i] };
+    if (who.length === 1) { pile.forEach((n, c) => S.players[who[0]].haul[c] += n); S.islands[i] = zeros(); }
+    return { kind: who.length === 1 ? 'raid' : who.length ? 'crash' : 'empty', who, before: [...pile] };
   });
-  S.maxIsland = Math.max(S.maxIsland, ...S.islands);
-  S.history.push({ round: S.round, picks: [...picks], results });
-  const top = Math.max(...S.players.map(p => p.score));
-  if (top >= RULES.winAt) S.winners = S.players.filter(p => p.score === top);
-  return results;
+  const due = S.islands.filter((_, i) => results[i].kind !== 'crash'); // a crashed island is frozen
+  const set = S.players.filter(p => Math.max(...p.haul) >= RULES.winAt);
+  if (set.length) S.winners = top(set);
+  else if (total(S.bag) < due.length * RULES.refill) { S.winners = top(S.players); S.bagOut = true; }
+  else due.forEach(pile => draw(pile, RULES.refill));
+  results.forEach((r, i) => (r.after = [...S.islands[i]]));
+  S.maxIsland = Math.max(S.maxIsland, ...S.islands.map(total));
+  S.history.push({ round: S.round, picks: [...picks], results }); // the full record; players see it only on the end screen
 }
 
 // ---- Actions (called from buttons) ----
@@ -127,48 +155,53 @@ const act = {
 // ---- Views ----
 const L = i => LETTERS[i];
 const names = who => who.map(p => S.players[p].name).join(' & ');
+const tokens = counts => counts.map((n, c) => n ? `<span class="t" style="background:${RULES.treasure[c].ink}">${RULES.treasure[c].mark}${n > 1 ? `×${n}` : ''}</span>` : '').join('') || '<span class="empty">empty</span>';
+const letters = counts => counts.map((n, c) => RULES.treasure[c].mark.repeat(n)).join('') || '–';
+const bestColour = p => { const n = Math.max(...p.haul), t = RULES.treasure[p.haul.indexOf(n)]; return `${n} ${n === 1 ? t.one : t.name}`; };
 
 function board() {
-  const last = S.history.at(-1);
-  return `<div class="row">${S.islands.map((c, i) => `<div class="card">Island ${L(i)}<b>${c}</b>coins</div>`).join('')}</div>
-    <div class="row">${S.players.map(p => `<div class="card">${p.name}${p.bot ? ` <span class="muted">🤖 ${p.bot.name}</span>` : ''}<b>${p.score}</b></div>`).join('')}</div>
-    <p class="muted">Round ${S.round} · first to ${RULES.winAt} coins wins${last && S.phase !== 'reveal'
-      ? ` · last round: ${last.picks.map((isl, p) => `${S.players[p].name}→${L(isl)}`).join(', ')}` : ''}</p>`;
+  return `<div class="row">${S.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
+    <div class="row">${S.players.map(p => `<div class="card">${p.name}${p.bot ? ` <span class="muted">🤖 ${p.bot.name}</span>` : ''}<br>${tokens(p.haul)}</div>`).join('')}</div>
+    <p class="muted">Round ${S.round} · first to ${RULES.winAt} of one colour wins</p>`;
 }
 
 function resultLine(r, i) {
-  if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone, +${r.coins} coin${r.coins === 1 ? '' : 's'}! (${r.after} left)</p>`;
-  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. Nobody scores. (${r.coins} → ${r.after})</p>`;
-  return `<p class="empty"><b>${L(i)}:</b> Nobody came. (${r.coins} → ${r.after})</p>`;
+  if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone and took ${tokens(r.before)}! Now: ${tokens(r.after)}</p>`;
+  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. Nobody takes anything and ${L(i)} stays frozen.</p>`;
+  return `<p class="empty"><b>${L(i)}:</b> Nobody came. Now: ${tokens(r.after)}</p>`;
 }
 
 const views = {
   pass: () => `<div class="cover"><p>Round ${S.round}: pass the device to</p><h2>${S.players[S.turn].name}</h2>
     <p>Everyone else, look away!</p><button class="big" onclick="act.show()">I'm ${S.players[S.turn].name}, show islands</button></div>`,
   pick: () => `<h2>${S.players[S.turn].name}, choose an island</h2>
-    <div class="row">${S.islands.map((c, i) => `<button class="card ${S.sel === i ? 'sel' : ''}" onclick="act.choose(${i})">${L(i)}<b>${c}</b></button>`).join('')}</div>
+    <div class="row">${S.islands.map((pile, i) => `<button class="card ${S.sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
     <button class="big" ${S.sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${S.sel === null ? '' : ` Island ${L(S.sel)}`}</button>`,
   reveal: () => `<h2>Reveal!</h2>
     <p>${S.picks.map((isl, p) => `<b>${S.players[p].name}</b> → ${L(isl)}`).join(' · ')}</p>
     ${S.history.at(-1).results.map(resultLine).join('')}
+    ${S.bagOut ? `<p class="crash"><b>The bag can't refill every island: the game ends!</b></p>` : ''}
     <button class="big" onclick="act.next()">${S.winners ? 'See who won' : 'Next round'}</button>`,
   end: () => {
     const all = S.history.flatMap(h => h.results);
-    return `<h2>🏆 ${S.winners.map(p => p.name).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'} with ${S.winners[0].score} coins!</h2>
+    return `<h2>🏆 ${S.winners.map(p => `${p.name} (${bestColour(p)})`).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'}!</h2>
+    ${S.bagOut ? `<p>The bag ran out, so the most of one colour won.</p>` : ''}
     <p>Rounds: <b>${S.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
-       Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b></p>
+       Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b> tokens</p>
     <table><tr><th>Round</th>${S.players.map(p => `<th>${p.name}</th>`).join('')}<th>Islands after</th></tr>
     ${S.history.map(h => `<tr><td>${h.round}</td>${h.picks.map((isl, p) => {
       const r = h.results[isl];
-      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${r.coins}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
-    }).join('')}<td>${h.results.map((r, i) => `${L(i)}${r.after}`).join(' ')}</td></tr>`).join('')}</table>
+      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
+    }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table>
     <button class="big" onclick="act.again()">New game</button>`;
   },
 };
 
 function setupView() {
-  return `<h1>🏴‍☠️ Pirate Islands</h1><p>Secretly pick an island. Alone? Take all its treasure (it keeps ${RULES.raidLeaves}).
-    Anyone else there? Crash: nobody scores. Untaken islands grow by ${RULES.growth}. First to ${RULES.winAt} coins wins.</p>
+  return `<h1>🏴‍☠️ Pirate Islands</h1><p>Secretly pick an island. Alone? Take its whole pile.
+    Anyone else there? Crash: nobody takes anything and the island freezes. Every other island gets ${RULES.refill} new treasure
+    from the bag. First to ${RULES.winAt} of one colour wins.</p>
+    <p>${RULES.treasure.map((t, c) => `${tokens(zeros().map((_, k) => +(k === c)))} ${t.name}`).join(' · ')}</p>
     <h2>Players</h2><div class="row">${[...Array(RULES.maxPlayers - RULES.minPlayers + 1)].map((_, k) => {
       const n = RULES.minPlayers + k;
       return `<button class="card ${setup.count === n ? 'sel' : ''}" onclick="act.count(${n})">${n}</button>`;
