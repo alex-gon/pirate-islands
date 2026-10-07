@@ -112,7 +112,7 @@ function botPick(me) {
 }
 
 // The tie order: most of one colour, then most different colours, then most pieces; whoever is level at the top shares.
-function top(players) {
+function leaders(players) {
   const key = p => (Math.max(...p.haul) * 10 + p.haul.filter(Boolean).length) * 100 + total(p.haul);
   const best = Math.max(...players.map(key));
   return players.filter(p => key(p) === best);
@@ -127,8 +127,8 @@ function resolve(picks) {
   });
   const due = S.islands.filter((_, i) => results[i].kind !== 'crash'); // a crashed island is frozen
   const set = S.players.filter(p => Math.max(...p.haul) >= RULES.winAt);
-  if (set.length) S.winners = top(set);
-  else if (total(S.bag) < due.length * RULES.refill) { S.winners = top(S.players); S.bagOut = true; }
+  if (set.length) S.winners = leaders(set);
+  else if (total(S.bag) < due.length * RULES.refill) { S.winners = leaders(S.players); S.bagOut = true; }
   else due.forEach(pile => draw(pile, RULES.refill));
   results.forEach((r, i) => (r.after = [...S.islands[i]]));
   S.maxIsland = Math.max(S.maxIsland, ...S.islands.map(total));
