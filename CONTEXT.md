@@ -73,6 +73,11 @@ A room before its game starts: people join, and the host sets the seats and pres
 phase of a room, never another name for the room.
 _Avoid_: waiting room, setup
 
+**Pass and play**:
+Playing on one shared device passed round the table, each person picking in secret in turn. No
+room, no host: the other way to play besides a room.
+_Avoid_: hotseat (the code's nickname for its page, never a word players read), local game
+
 ## Relationships
 
 - A **Round** gives each **Seat** at most one **Pick**; a **Seat** with none is **Skipped**.
@@ -82,6 +87,7 @@ _Avoid_: waiting room, setup
 - A **Room** holds one game; each **Seat** in it is played by at most one connection.
 - A **Room** has one **Host** and one **Room code**, and is a **Lobby** until the **Host** starts
   a game, and again when the **Host** begins a new one.
+- **Pass and play** has **Seats** and **Bot seats** but no **Room**, **Host** or **Lobby**.
 
 ## Example dialogue
 
