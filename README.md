@@ -20,7 +20,7 @@ install or build, and it has no dependencies.
 
 ## Play online (one room, on this computer)
 
-`online/` runs one room where three browser tabs each play a seat and see only their own view.
+`online/` runs rooms, each with a code, where browser tabs each play a seat and see only their own view.
 It's the one folder with dependencies (just Cloudflare's `wrangler`), it needs Node 22 or later,
 and it runs offline with no Cloudflare account.
 
@@ -28,10 +28,11 @@ and it runs offline with no Cloudflare account.
 cd online && npm install && npm run dev
 ```
 
-Then open `http://localhost:8787` in three tabs. The game starts when every seat has joined. The
-room saves itself in `online/.wrangler/state` and carries on after a restart; delete that folder to
-reset it. To change the seats, or make some of them bots, edit the `SEATS` line at the top of
-`online/src/room.js`.
+A host creates a room with `POST /create` and `{ name }`, which returns its code; everyone opens
+`http://localhost:8787/?room=CODE`, the host with the same name. The host chooses 3–5 seats and
+which are bots (the `seats` message) and starts the game (`start`). Until the setup and lobby
+screens are built, creating the room, `seats` and `start` are sent by hand. Each room saves itself
+in `online/.wrangler/state` and carries on after a restart; delete that folder to reset them all.
 
 ## Rules (v0.2)
 

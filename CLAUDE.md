@@ -21,16 +21,21 @@ when 2+ humans are seated.
   bot-only games on `rules.js` and fails if a game throws, runs past 100 rounds, or `viewFor` shows
   a seat the bag, another seat's pick this round, or the history before the end. Some games skip
   seats; the last 100 use a small bag so it runs out. Run it after any change to `rules.js`.
-- **`online/`: the one folder with dependencies.** One room for playing in browser tabs on this
-  Mac: a Cloudflare Worker with a Durable Object, `online/src/room.js`, that holds the real game on
-  `rules.js` and sends each connection only `viewFor` its own seat. `online/package.json` holds
-  only `wrangler`; nothing else is added without a reason. Run it with
-  `cd online && npm install && npm run dev`, then open `http://localhost:8787` (the room is
-  `ws://localhost:8787/room`). It runs offline with no Cloudflare account; nothing is deployed.
-  `online/public/` is the page, with `rules.js` as a symlink to the root file. The room saves
-  itself in `online/.wrangler/state`, which survives restarts: delete that folder to reset it.
-  The seats are the `SEATS` line at the top of `room.js`; resolving when every seat has picked
-  and the `next` message are build scaffolding that the pick timer replaces.
+- **`online/`: the one folder with dependencies.** Rooms for playing in browser tabs on this
+  Mac: a Cloudflare Worker with one Durable Object per room, `online/src/room.js`, that holds the
+  real game on `rules.js` and sends each connection only `viewFor` its own seat. `online/package.json`
+  holds only `wrangler`; nothing else is added without a reason. Run it with
+  `cd online && npm install && npm run dev`. It runs offline with no Cloudflare account; nothing is
+  deployed. `online/public/` is the page, with `rules.js` as a symlink to the root file.
+- **Rooms by code.** `POST /create` with `{ name }` makes a 5-character room code, saves the room
+  with 3 open seats and that name on seat 0, and returns `{ code }`. The link is
+  `http://localhost:8787/?room=CODE`; the room is `ws://localhost:8787/room/CODE`, and a code no
+  create made is refused and closed. The **host** is whoever holds seat 0 (a vacant seat 0 goes only
+  to a name match); only the host sends `seats` (3–5 entries, each open or a bot), `start` and
+  `new`, which returns to the lobby. There is no `SEATS` line any more: the seats live in each
+  room's storage. Each room saves itself in `online/.wrangler/state`, which survives restarts:
+  delete that folder to reset every room. Resolving when every seat has picked and the `next`
+  message are build scaffolding that the pick timer replaces.
 
 ## Where the planning lives
 

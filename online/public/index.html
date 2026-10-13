@@ -45,7 +45,8 @@ const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // everyth
 let seat, waiting, V, error; // the room's last message, drawn as it is: the page keeps no game of its own
 let sel = null, joined = false, lost = false; // the island selected but not locked in; whether this tab sent join; the room closed
 
-const ws = new WebSocket(`ws://${location.host}/room`), send = msg => ws.send(JSON.stringify(msg));
+const code = (new URLSearchParams(location.search).get('room') ?? '').toUpperCase(); // the link is /?room=K7QXM
+const ws = new WebSocket(`ws://${location.host}/room/${encodeURIComponent(code)}`), send = msg => ws.send(JSON.stringify(msg));
 const saved = (() => { try { return sessionStorage.getItem('name'); } catch { return null; } })(); // per tab, so a refresh keeps the seat
 ws.onopen = () => { if (saved !== null) act.join(saved); };
 ws.onmessage = e => { ({ seat, waiting, view: V, error } = JSON.parse(e.data)); render(); };
