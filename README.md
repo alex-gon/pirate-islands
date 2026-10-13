@@ -4,13 +4,13 @@ A small pirate game where you bluff and predict. Everyone secretly picks an isla
 time. If you're the only one who picked it, you take its treasure. If others picked it too, it
 **crashes** and nobody gets anything.
 
-This repo holds a one-file digital prototype for playtesting the tabletop rules (v0.2). Up to 5
+This repo holds a small digital prototype for playtesting the tabletop rules (v0.2). Up to 5
 players share one screen, and any seat can be played by a bot, so you can play alone.
 
 ## Play
 
-Open `index.html` in any modern browser. There's nothing to install or build, and it has no
-dependencies.
+Open `index.html` in any modern browser, with `rules.js` in the same folder. There's nothing to
+install or build, and it has no dependencies.
 
 1. Choose 3–5 seats, name them, and make any seat a human or a bot (**Greedy**, **Sneaky** or
    **Wild**).
@@ -52,7 +52,8 @@ an island a rival could win on.
 
 ## Tweaking
 
-All the game numbers are in the `RULES` block at the top of the script in `index.html`. That
+The game lives in `rules.js`, and `index.html` is the screen you play on. All the game numbers
+are in the `RULES` block at the top of `rules.js`. That
 includes colours, tokens per colour, starting pile, refill amount, win target and player count.
 To try a variant, you usually only need to change one line. Bot tuning lives in the `BOTS` block
 next to it.
