@@ -51,12 +51,21 @@ What one seat may see of a game: everything public plus its own pick, never the 
 seat's pick this round, or older reveals before the end.
 _Avoid_: client state, snapshot
 
+**Room**:
+One place online where players' tabs or phones meet to play one game at a time, seat by seat.
+_Avoid_: lobby, server, match
+
+**Spectator**:
+Someone connected to a room without a seat. Sees only what every seat can see, and can't pick.
+_Avoid_: observer, watcher
+
 ## Relationships
 
 - A **Round** gives each **Seat** at most one **Pick**; a **Seat** with none is **Skipped**.
 - Resolving a **Round** adds one **Reveal** and moves treasure from **Piles** to **Hauls**, and
   from the **Bag** to **Piles**.
-- A **View** is always for one **Seat**, or for a spectator.
+- A **View** is always for one **Seat**, or for a **Spectator**.
+- A **Room** holds one game; each **Seat** in it is played by at most one connection.
 
 ## Example dialogue
 
