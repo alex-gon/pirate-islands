@@ -45,7 +45,8 @@ export class Room extends DurableObject {
     for (const other of this.open()) this.send(other);
   }
 
-  webSocketClose(ws, code) { ws.close(code); }
+  // The others hear that the seat is free. A plain close: 1005 and 1006 can't be sent back.
+  webSocketClose(ws) { ws.close(); for (const other of this.open()) this.send(other); }
 
   // Applies one message from ws, or returns a short reason to refuse it.
   handle(ws, data) {

@@ -27,6 +27,13 @@ when 2+ humans are seated.
   holds only `wrangler`; nothing else is added without a reason. Run it with
   `cd online && npm install && npm run dev`. It runs offline with no Cloudflare account; nothing is
   deployed. `online/public/` is the page, with `rules.js` as a symlink to the root file.
+  `"dev": { "ip": "0.0.0.0" }` in `wrangler.jsonc` puts it on the Mac's Wi-Fi address too, which
+  wrangler prints, so phones on the same network can play.
+- **The page's screens.** `/` is the setup screen: one name, Create a room, Join by code, and
+  **Pass and play**, a link to `/hotseat`. That is `online/public/hotseat.html`, a symlink to the
+  root `index.html`, which stays untouched. `/?room=CODE` skips setup; the host gets the code large,
+  a dropdown per seat, − / + and Start, guests a waiting lobby, and only the host gets New game.
+  The name lives in `sessionStorage` (a refresh rejoins); `localStorage` only prefills the field.
 - **Rooms by code.** `POST /create` with `{ name }` makes a 5-character room code, saves the room
   with 3 open seats and that name on seat 0, and returns `{ code }`. The link is
   `http://localhost:8787/?room=CODE`; the room is `ws://localhost:8787/room/CODE`, and a code no
