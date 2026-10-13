@@ -53,11 +53,25 @@ _Avoid_: client state, snapshot
 
 **Room**:
 One place online where players' tabs or phones meet to play one game at a time, seat by seat.
-_Avoid_: lobby, server, match
+_Avoid_: server, match
 
 **Spectator**:
 Someone connected to a room without a seat. Sees only what every seat can see, and can't pick.
 _Avoid_: observer, watcher
+
+**Room code**:
+The five characters that name one room. A code that names no room is refused, never created.
+_Avoid_: room id, PIN
+
+**Host**:
+The person who created a room, always in seat 0. Only the host chooses the seats and bots, starts
+the game, and begins a new one.
+_Avoid_: owner, admin, leader
+
+**Lobby**:
+A room before its game starts: people join, and the host sets the seats and presses Start. A
+phase of a room, never another name for the room.
+_Avoid_: waiting room, setup
 
 ## Relationships
 
@@ -66,6 +80,8 @@ _Avoid_: observer, watcher
   from the **Bag** to **Piles**.
 - A **View** is always for one **Seat**, or for a **Spectator**.
 - A **Room** holds one game; each **Seat** in it is played by at most one connection.
+- A **Room** has one **Host** and one **Room code**, and is a **Lobby** until the **Host** starts
+  a game, and again when the **Host** begins a new one.
 
 ## Example dialogue
 
@@ -77,3 +93,5 @@ _Avoid_: observer, watcher
 
 - "Player" meant both the person and the place at the table. Resolved: the place is a **Seat**;
   a person can leave and return to it.
+- "Lobby" was avoided as a name for the **Room**. Resolved: a **Lobby** is the phase of a room
+  before its game starts, never the room itself.
