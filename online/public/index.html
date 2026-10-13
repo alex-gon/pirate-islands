@@ -1,4 +1,135 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pirate Islands Online</title>
-<p>Placeholder: the page comes with PIO2 05. The room is at <code>ws://localhost:8787/room</code>.</p>
+<style>
+  body { font: 17px/1.4 system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 16px; background: #f4efe3; color: #222; }
+  h1 { margin: 0 0 12px; } h2 { margin: 16px 0 8px; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .card { flex: 1; min-width: 70px; background: #fff; border: 2px solid #c9b78f; border-radius: 10px; padding: 8px; text-align: center; }
+  .card b { display: block; font-size: 26px; }
+  .card.you { border-color: #1d5c7a; box-shadow: 0 0 0 2px #1d5c7a; }
+  .t { display: inline-block; min-width: 1.4em; margin: 2px; padding: 0 4px; border: 1px solid #0005; border-radius: 9px; font-weight: bold; font-size: 15px; }
+  button { font: inherit; padding: 10px 16px; border: 0; border-radius: 8px; background: #1d5c7a; color: #fff; cursor: pointer; margin: 4px 0; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.big { width: 100%; font-size: 20px; padding: 16px; }
+  button.card { color: #222; } button.sel { border-color: #1d5c7a; background: #d7ecf5; }
+  .raid { color: #1a7f37; } .crash { color: #b42318; } .empty { color: #777; }
+  .muted { color: #666; font-size: 15px; }
+  table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid #ddd; padding: 4px; text-align: center; }
+  input { font: inherit; padding: 8px; flex: 1; margin: 3px 0; }
+</style>
+</head>
+<body>
+<h1>🏴‍☠️ Pirate Islands</h1>
+<div id="note"></div>
+<fieldset id="room">
+  <!-- Outside #app so a redraw while typing keeps the name and the focus -->
+  <form id="join" hidden onsubmit="event.preventDefault(); act.join(this.elements.who.value)">
+    <h2>Join the room</h2>
+    <div class="row"><input name="who" maxlength="20" placeholder="Your name"><button>Join</button></div>
+  </form>
+  <div id="app"><p class="muted">Finding the room…</p></div>
+</fieldset>
+<script src="rules.js"></script>
+<script>
+// The online page: one tab, one seat. The game runs only in the room (online/src/room.js); this page
+// draws the room's last message and sends join, pick, next and new. From rules.js it reads only RULES.
+const { RULES } = Rules;
+const LETTERS = 'ABCDE';
+const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // everything in a message comes from the room or other tabs
+
+let seat, waiting, V, error; // the room's last message, drawn as it is: the page keeps no game of its own
+let sel = null, joined = false, lost = false; // the island selected but not locked in; whether this tab sent join; the room closed
+
+const ws = new WebSocket(`ws://${location.host}/room`), send = msg => ws.send(JSON.stringify(msg));
+const saved = (() => { try { return sessionStorage.getItem('name'); } catch { return null; } })(); // per tab, so a refresh keeps the seat
+ws.onopen = () => { if (saved !== null) act.join(saved); };
+ws.onmessage = e => { ({ seat, waiting, view: V, error } = JSON.parse(e.data)); render(); };
+ws.onclose = () => { lost = true; render(); }; // no auto-reconnect: that's Project 4
+
+// ---- Actions (called from buttons) ----
+const act = {
+  join(name) { try { sessionStorage.setItem('name', name); } catch {} joined = true; document.getElementById('join').hidden = true; send({ type: 'join', name }); },
+  choose(i) { sel = i; render(); },
+  lock() { send({ type: 'pick', island: sel }); sel = null; },
+  next() { send({ type: 'next' }); },
+  again() { send({ type: 'new' }); },
+};
+
+// ---- Views: drawn from the last message alone ----
+const L = i => LETTERS[i];
+const name = q => esc(V.players[q].name);
+const names = who => who.map(name).join(' & ');
+const you = q => (q === seat ? ' (you)' : '');
+const bot = b => (b ? ` <span class="muted">🤖 ${esc(b)}</span>` : '');
+const tokens = counts => counts.map((n, c) => n ? `<span class="t" style="background:${RULES.treasure[c].ink}">${RULES.treasure[c].mark}${n > 1 ? `×${n}` : ''}</span>` : '').join('') || '<span class="empty">empty</span>';
+const letters = counts => counts.map((n, c) => RULES.treasure[c].mark.repeat(n)).join('') || '–';
+const bestColour = p => { const n = Math.max(...p.haul), t = RULES.treasure[p.haul.indexOf(n)]; return `${n} ${n === 1 ? t.one : t.name}`; };
+const roundOpen = () => !V.last || V.last.round !== V.round;
+
+// Before the game: every seat by name, a bot as "Player N 🤖 Greedy", or not yet joined.
+const seatList = () => `<div class="row">${waiting.map((s, q) => `<div class="card ${q === seat ? 'you' : ''}">${s.name === null
+  ? '<span class="muted">not yet joined</span>' : esc(s.name || `Player ${q + 1}`) + you(q)}${bot(s.bot)}</div>`).join('')}</div>`;
+
+// ticks: a ✓ beside each seat that has picked this round.
+function board(ticks) {
+  return `<div class="row">${V.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
+    <div class="row">${V.players.map((p, q) => `<div class="card ${q === seat ? 'you' : ''}">${name(q)}${you(q)}${bot(p.bot)}${ticks && p.picked ? ' ✓' : ''}<br>${tokens(p.haul)}</div>`).join('')}</div>
+    <p class="muted">Round ${V.round} · first to ${RULES.winAt} of one colour wins</p>`;
+}
+
+function resultLine(r, i) {
+  if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone and took ${tokens(r.before)}! Now: ${tokens(r.after)}</p>`;
+  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. Nobody takes anything and ${L(i)} stays frozen.</p>`;
+  return `<p class="empty"><b>${L(i)}:</b> Nobody came. Now: ${tokens(r.after)}</p>`;
+}
+
+const reveal = () => `<h2>Reveal!</h2>
+  <p>${V.last.picks.map((isl, q) => `<b>${name(q)}</b> → ${isl === null ? 'no island' : L(isl)}`).join(' · ')}</p>
+  ${V.last.results.map(resultLine).join('')}
+  ${V.bagOut ? `<p class="crash"><b>The bag can't refill every island: the game ends!</b></p>` : ''}`;
+
+const pickView = () => `<h2>Choose an island</h2>
+  <div class="row">${V.islands.map((pile, i) => `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
+  <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>`;
+
+function end() {
+  const all = V.history.flatMap(h => h.results);
+  return `<h2>🏆 ${V.winners.map(q => `${name(q)} (${bestColour(V.players[q])})`).join(' & ')} ${V.winners.length > 1 ? 'share the win' : 'wins'}!</h2>
+  ${V.bagOut ? `<p>The bag ran out, so the most of one colour won.</p>` : ''}
+  <p>Rounds: <b>${V.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
+     Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${V.maxIsland}</b> tokens</p>
+  <table><tr><th>Round</th>${V.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
+  ${V.history.map(h => `<tr><td>${h.round}</td>${h.picks.map(isl => {
+    const r = h.results[isl];
+    if (!r) return '<td>–</td>'; // skipped: no island
+    return `<td class="${esc(r.kind)}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
+  }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table>
+  ${seat !== null ? '<button class="big" onclick="act.again()">New game</button>' : ''}`;
+}
+
+// The screen follows from the message (PIO2 03's table in the vault).
+function screen() {
+  if (seat === null && !joined) return waiting ? seatList() : board(); // Join: the form above, the room underneath
+  if (V?.over) return board() + reveal() + end(); // Game over, for a seat or a spectator
+  if (seat === null) return `<h2>Watching</h2><p class="muted">Every seat is taken.</p>${waiting ? seatList() : board() + (V.last ? reveal() : '')}`;
+  if (waiting) return `<h2>Waiting for seats</h2>${seatList()}`;
+  if (!roundOpen()) return board() + reveal() + '<button class="big" onclick="act.next()">Next round</button>';
+  if (V.myPick === null) return board() + pickView();
+  return board(true) + `<h2>You picked ${L(V.myPick)}</h2><p class="muted">✓ = picked. Waiting for the others…</p>`;
+}
+
+function render() {
+  document.getElementById('note').innerHTML = (lost ? '<p class="crash"><b>Lost the room. Reload to rejoin.</b></p>' : '')
+    + (error ? `<p class="crash">${esc(error)}</p>` : '');
+  document.getElementById('room').disabled = lost;
+  document.getElementById('join').hidden = joined || seat !== null;
+  if (seat !== undefined) document.getElementById('app').innerHTML = screen();
+}
+</script>
+</body>
+</html>
