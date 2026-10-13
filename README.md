@@ -59,4 +59,6 @@ To try a variant, you usually only need to change one line. Bot tuning lives in 
 next to it.
 
 The code is plain JavaScript with no framework, no build step and no tests. That's on purpose:
-this is a throwaway prototype for finding out whether the core loop is fun.
+this is a throwaway prototype for finding out whether the core loop is fun. The one exception is
+`node check.js`, which plays 1,000 bot-only games to check that every game ends and no player
+can see hidden information. Run it after changing `rules.js`.

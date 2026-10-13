@@ -17,6 +17,10 @@ when 2+ humans are seated.
   last round's picks), never this round's locks or the bag, and never change the rules.
 - **Keep it tiny and readable.** Fewer lines over cleverness. No framework, no tests, no tooling
   unless a playtest proves it's needed.
+- **One exception: the bot check.** `node check.js` (no dependencies, about 20 s) plays 1,000
+  bot-only games on `rules.js` and fails if a game throws, runs past 100 rounds, or `viewFor` shows
+  a seat the bag, another seat's pick this round, or the history before the end. Some games skip
+  seats; the last 100 use a small bag so it runs out. Run it after any change to `rules.js`.
 
 ## Where the planning lives
 
