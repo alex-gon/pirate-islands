@@ -18,6 +18,21 @@ install or build, and it has no dependencies.
    when 2 or more humans are playing.
 3. All picks are revealed together, and the islands resolve.
 
+## Play online (one room, on this computer)
+
+`online/` runs one room where three browser tabs each play a seat and see only their own view.
+It's the one folder with dependencies (just Cloudflare's `wrangler`), it needs Node 22 or later,
+and it runs offline with no Cloudflare account.
+
+```sh
+cd online && npm install && npm run dev
+```
+
+Then open `http://localhost:8787` in three tabs. The game starts when every seat has joined. The
+room saves itself in `online/.wrangler/state` and carries on after a restart; delete that folder to
+reset it. To change the seats, or make some of them bots, edit the `SEATS` line at the top of
+`online/src/room.js`.
+
 ## Rules (v0.2)
 
 - There is **one island per player**, and treasure comes in **5 colours**: Rubies, Emeralds,

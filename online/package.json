@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "scripts": { "dev": "wrangler dev" },
+  "devDependencies": { "wrangler": "4.149.0" }
+}

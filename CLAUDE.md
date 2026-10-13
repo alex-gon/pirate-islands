@@ -7,7 +7,7 @@ islands one at a time, then watch the reveal. Any seat can be a **bot**
 when 2+ humans are seated.
 
 - **Two files.** `rules.js` is the game: rules and bots, a classic script that sets
-  `globalThis.Rules`, shared by this page, the future server (`import "./rules.js"`) and Node
+  `globalThis.Rules`, shared by this page, the online room (`import "../../rules.js"`) and Node
   (`require("./rules.js")`). Every function takes the game state, a JSON-safe object, and nothing
   in it reads a global. `index.html` is the hotseat: screens, turn order, pass screens; it loads
   `rules.js` with a plain `<script src>` and still opens with a double-click. Plain JS, no build, no
@@ -21,6 +21,16 @@ when 2+ humans are seated.
   bot-only games on `rules.js` and fails if a game throws, runs past 100 rounds, or `viewFor` shows
   a seat the bag, another seat's pick this round, or the history before the end. Some games skip
   seats; the last 100 use a small bag so it runs out. Run it after any change to `rules.js`.
+- **`online/`: the one folder with dependencies.** One room for playing in browser tabs on this
+  Mac: a Cloudflare Worker with a Durable Object, `online/src/room.js`, that holds the real game on
+  `rules.js` and sends each connection only `viewFor` its own seat. `online/package.json` holds
+  only `wrangler`; nothing else is added without a reason. Run it with
+  `cd online && npm install && npm run dev`, then open `http://localhost:8787` (the room is
+  `ws://localhost:8787/room`). It runs offline with no Cloudflare account; nothing is deployed.
+  `online/public/` is the page, with `rules.js` as a symlink to the root file. The room saves
+  itself in `online/.wrangler/state`, which survives restarts: delete that folder to reset it.
+  The seats are the `SEATS` line at the top of `room.js`; resolving when every seat has picked
+  and the `next` message are build scaffolding that the pick timer replaces.
 
 ## Where the planning lives
 
@@ -29,7 +39,8 @@ Not here. Design and rules are in the Obsidian vault at `~/code/vault`:
 - Rules (source of truth): `Games/Pirate Islands/Pirate Islands - Rules.md`
 - Game note and playtest log: `Games/Pirate Islands/Pirate Islands.md`
 - Wayfinder maps and tickets: `Projects/Pirate Islands Digital/PI Map.md` (v0.1), `Projects/Pirate Islands v0.2/PI2 Map.md` (v0.2),
-  `Projects/Pirate Islands Online Rules Module/PIO Map.md` (the rules in `rules.js`)
+  `Projects/Pirate Islands Online Rules Module/PIO Map.md` (the rules in `rules.js`),
+  `Projects/Pirate Islands Online One Room/PIO2 Map.md` (the room in `online/`)
 
 Never invent a rule. If the build needs one the rules don't give, ask Alex and record it in the
 vault rules.
