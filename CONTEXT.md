@@ -81,7 +81,8 @@ _Avoid_: room id, PIN
 **Host**:
 The one seated person who chooses the seats and bots, starts the game, and begins a new one. At
 first it is whoever created the room, in seat 0. While the host is disconnected, any seated person
-may start or begin a new game, and becomes the host; the old host returns as an ordinary player.
+may do what the host does (choose the seats, start, or begin a new game), and the first to do so
+becomes the host; the old host returns as an ordinary player.
 _Avoid_: owner, admin, leader
 
 **Lobby**:
@@ -106,6 +107,8 @@ _Avoid_: hotseat (the code's nickname for its page, never a word players read), 
 - **Pass and play** has **Seats** and **Bot seats** but no **Room**, **Host** or **Lobby**.
 - A **Dropped** person's **Seat** is played by a **Stand-in** until the holder of its **Seat token**
   returns; the **Seat** keeps its **Haul** either way, and is open again in the next **Lobby**.
+- A **Room** closes when every person's **Seat** is **Dropped**: its game ends with no winner, and
+  its **Room code** names no room any more.
 
 ## Example dialogue
 
