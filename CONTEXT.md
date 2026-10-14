@@ -14,6 +14,21 @@ _Avoid_: player slot, turn
 A seat played by a computer personality (Greedy, Sneaky or Wild) from the start of the game.
 _Avoid_: AI, CPU
 
+**Stand-in**:
+The bot (always Sneaky) that plays a dropped person's seat from the round their pick timer ran out
+until they return. It lasts only for that game. Players read it as "left · a bot is playing".
+_Avoid_: replacement, bot seat (that is a bot for the whole game)
+
+**Dropped**:
+A seated person whose connection is gone when the pick timer runs out. Their seat gets a
+**Stand-in**, never a skip. A connected person who is just slow is **Skipped** instead.
+_Avoid_: disconnected (a phone can disconnect and return within one round without dropping), left
+
+**Seat token**:
+The private proof, kept on one device, that a seat belongs to the person there. Only its holder
+can return to a seat; someone without it can only watch.
+_Avoid_: session, password
+
 **Pick**:
 The island a seat chooses for this round. Final once made.
 _Avoid_: choice, move, lock
@@ -64,8 +79,9 @@ The five characters that name one room. A code that names no room is refused, ne
 _Avoid_: room id, PIN
 
 **Host**:
-The person who created a room, always in seat 0. Only the host chooses the seats and bots, starts
-the game, and begins a new one.
+The one seated person who chooses the seats and bots, starts the game, and begins a new one. At
+first it is whoever created the room, in seat 0. While the host is disconnected, any seated person
+may start or begin a new game, and becomes the host; the old host returns as an ordinary player.
 _Avoid_: owner, admin, leader
 
 **Lobby**:
@@ -88,12 +104,14 @@ _Avoid_: hotseat (the code's nickname for its page, never a word players read), 
 - A **Room** has one **Host** and one **Room code**, and is a **Lobby** until the **Host** starts
   a game, and again when the **Host** begins a new one.
 - **Pass and play** has **Seats** and **Bot seats** but no **Room**, **Host** or **Lobby**.
+- A **Dropped** person's **Seat** is played by a **Stand-in** until the holder of its **Seat token**
+  returns; the **Seat** keeps its **Haul** either way, and is open again in the next **Lobby**.
 
 ## Example dialogue
 
 > **Dev:** "Jamie's phone locked and the timer ran out. Is Jamie **skipped**?"
-> **Alex:** "Only if they're connected but slow. A dropped player gets a bot **pick** for their
-> **seat** instead, and the seat keeps its **haul** when they come back."
+> **Alex:** "Only if they're connected but slow. Jamie is **dropped**, so a **stand-in** picks for
+> the **seat** instead, and the seat keeps its **haul** when Jamie's **seat token** comes back."
 
 ## Flagged ambiguities
 
@@ -101,3 +119,7 @@ _Avoid_: hotseat (the code's nickname for its page, never a word players read), 
   a person can leave and return to it.
 - "Lobby" was avoided as a name for the **Room**. Resolved: a **Lobby** is the phase of a room
   before its game starts, never the room itself.
+- "Bot" covered both a seat that is a bot all game and one that plays for a dropped person.
+  Resolved: the first is a **Bot seat**, the second a **Stand-in**.
+- "Host" meant seat 0. Resolved: the **Host** is a role that can move to another seat while the
+  host is disconnected; seat 0 is only where it starts.
