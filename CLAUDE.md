@@ -33,16 +33,32 @@ when 2+ humans are seated.
   **Pass and play**, a link to `/hotseat`. That is `online/public/hotseat.html`, a symlink to the
   root `index.html`, which stays untouched. `/?room=CODE` skips setup; the host gets the code large,
   a dropdown per seat, − / + and Start, guests a waiting lobby, and only the host gets New game.
-  The name lives in `sessionStorage` (a refresh rejoins); `localStorage` only prefills the field.
+  The name and the seat token live in `sessionStorage` (a refresh rejoins); `localStorage` only
+  prefills the name field. While visible, the page sends `ping` every 5 s.
 - **Rooms by code.** `POST /create` with `{ name }` makes a 5-character room code, saves the room
-  with 3 open seats and that name on seat 0, and returns `{ code }`. The link is
+  with 3 open seats and that name on seat 0, and returns `{ code, token }`. The link is
   `http://localhost:8787/?room=CODE`; the room is `ws://localhost:8787/room/CODE`, and a code no
-  create made is refused and closed. The **host** is whoever holds seat 0 (a vacant seat 0 goes only
-  to a name match); only the host sends `seats` (3–5 entries, each open or a bot), `start` and
-  `new`, which returns to the lobby. There is no `SEATS` line any more: the seats live in each
-  room's storage. Each room saves itself in `online/.wrangler/state`, which survives restarts:
-  delete that folder to reset every room. Resolving when every seat has picked and the `next`
-  message are build scaffolding that the pick timer replaces.
+  create made (or a closed room's) is refused and closed. Each room saves itself in
+  `online/.wrangler/state`, pending timers included, which survives restarts: delete that folder to
+  reset every room. Every message carries `host` and `timer` (`{ kind, msLeft }` or null), and
+  `standIns` once a game exists.
+- **Seat tokens.** The room makes one when it gives a person a seat and sends it only to that
+  connection. `join` is `{ name, token? }`: a matching token returns to its seat (the older
+  connection there becomes a spectator, told why), else the lowest open seat no token holds, else
+  watching. A token holds its seat in the lobby too, until the host makes it a bot or removes it.
+- **The host** is a seat, `room.host` (seat 0 at create). Only the host sends `seats` (3–5 entries,
+  each open or a bot), `start` and `new`, which returns to the lobby; while the host is away, any
+  seated person may, and becomes the host. **Connected** means a ping answered (the room's
+  automatic `pong`) or a join in the last 15 s; an open socket alone isn't enough.
+- **Timers.** `pickTimer` and `nextTimer` in `RULES` (60 and 15 s) are copied into the room at
+  Start and run on its one alarm, guarded by the saved `room.timer`. A round resolves when every
+  seat has picked or the pick timer runs out; then the countdown starts the next round by itself.
+  An alarm more than 2 s late (the server was down) restarts its phase instead.
+- **Stand-ins.** At the pick timer, a seat without a pick is skipped if connected, and dropped if
+  not: `room.standIns` marks it, and Sneaky picks for it then and at each round start. It ends at
+  the next round once its token holder is connected, and at New game a stand-in seat nobody holds
+  is open. If every person seat has a stand-in, the room closes: its storage is deleted, every
+  connection gets `room closed`, and its code names no room.
 
 ## Where the planning lives
 
@@ -52,7 +68,9 @@ Not here. Design and rules are in the Obsidian vault at `~/code/vault`:
 - Game note and playtest log: `Games/Pirate Islands/Pirate Islands.md`
 - Wayfinder maps and tickets: `Projects/Pirate Islands Digital/PI Map.md` (v0.1), `Projects/Pirate Islands v0.2/PI2 Map.md` (v0.2),
   `Projects/Pirate Islands Online Rules Module/PIO Map.md` (the rules in `rules.js`),
-  `Projects/Pirate Islands Online One Room/PIO2 Map.md` (the room in `online/`)
+  `Projects/Pirate Islands Online One Room/PIO2 Map.md` (the room in `online/`),
+  `Projects/Pirate Islands Online Lobby/PIO3 Map.md` (rooms by code, the host, phones),
+  `Projects/Pirate Islands Online Timers/PIO4 Map.md` (timers, stand-ins, reconnecting)
 
 Never invent a rule. If the build needs one the rules don't give, ask Alex and record it in the
 vault rules.

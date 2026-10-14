@@ -54,21 +54,22 @@
 <script src="rules.js"></script>
 <script>
 // The online page: one tab, one seat. The game runs only in the room (online/src/room.js); this page
-// draws the room's last message and sends join, seats, start, pick, next and new. From rules.js it
+// draws the room's last message and sends join, seats, start, pick and new. From rules.js it
 // reads only RULES and the bots' names.
 const { RULES, BOTS } = Rules;
 const LETTERS = 'ABCDE';
 const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // everything in a message comes from the room or other tabs
 const $ = id => document.getElementById(id);
 
-let seat, waiting, V, error; // the room's last message, drawn as it is: the page keeps no game of its own
+let seat, waiting, V, error, host; // the room's last message, drawn as it is: the page keeps no game of its own
 let sel = null, joined = false, lost = false, noRoom = false; // the island selected but not locked in; whether this tab sent join; the room closed; the code names no room
 
-// The code lives in the URL, the name in sessionStorage (per tab, so a refresh keeps the seat).
-// localStorage only prefills the name field: it never takes a seat.
+// The code lives in the URL, the name and the seat token in sessionStorage (per tab, so a refresh keeps
+// the seat). localStorage only prefills the name field: it never takes a seat.
 const code = (new URLSearchParams(location.search).get('room') ?? '').toUpperCase(); // the link is /?room=K7QXM
-const recall = store => { try { return window[store].getItem('name'); } catch { return null; } };
+const recall = (store, key = 'name') => { try { return window[store].getItem(key); } catch { return null; } };
 const keep = name => { try { sessionStorage.setItem('name', name); localStorage.setItem('name', name); } catch {} };
+const keepToken = token => { try { sessionStorage.setItem('token', token); } catch {} };
 for (const form of [$('setup'), $('join')]) form.elements.who.value = recall('localStorage') ?? '';
 
 let ws, send;
@@ -76,8 +77,15 @@ if (code) {
   ws = new WebSocket(`ws://${location.host}/room/${encodeURIComponent(code)}`), send = msg => ws.send(JSON.stringify(msg));
   const saved = recall('sessionStorage');
   ws.onopen = () => { if (saved !== null) act.join(saved); };
-  ws.onmessage = e => { const m = JSON.parse(e.data); noRoom = m.seat === undefined; ({ seat, waiting, view: V, error } = m); render(); };
-  ws.onclose = () => { lost = true; render(); }; // no auto-reconnect: that's Project 4
+  ws.onmessage = e => {
+    if (e.data === 'pong') return;
+    const m = JSON.parse(e.data); noRoom = m.seat === undefined; ({ seat, waiting, view: V, error, host } = m);
+    if (m.token) keepToken(m.token);
+    render();
+  };
+  ws.onclose = () => { lost = true; render(); }; // no auto-reconnect yet: PIO4 06
+  // While visible, a ping every 5 s tells the room this phone is still here; a seat silent for 15 s is dropped.
+  setInterval(() => { if (document.visibilityState === 'visible' && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 5000);
 }
 
 // ---- Actions (called from buttons) ----
@@ -86,18 +94,17 @@ const act = {
   async create() {
     const name = named(); if (!name) return;
     try {
-      const { code } = await (await fetch('/create', { method: 'POST', body: JSON.stringify({ name }) })).json();
-      keep(name); location.href = `/?room=${code}`; // one way into a room: the link, which joins seat 0 by name
+      const { code, token } = await (await fetch('/create', { method: 'POST', body: JSON.stringify({ name }) })).json();
+      keep(name); keepToken(token); location.href = `/?room=${code}`; // one way into a room: the link, which joins seat 0 by its token
     } catch { $('note').innerHTML = `<p class="crash">Couldn't make a room. Is the Mac's server running?</p>`; }
   },
   go() { const name = named(); if (name) { keep(name); location.href = `/?room=${$('setup').elements.code.value}`; } },
-  join(name) { keep(name); joined = true; $('join').hidden = true; send({ type: 'join', name }); },
+  join(name) { keep(name); joined = true; $('join').hidden = true; send({ type: 'join', name, token: recall('sessionStorage', 'token') ?? undefined }); },
   seat(q, bot) { send({ type: 'seats', bots: waiting.map((s, i) => (i === q ? bot || null : s.bot)) }); },
   resize(by) { const bots = waiting.map(s => s.bot); send({ type: 'seats', bots: by > 0 ? [...bots, null] : bots.slice(0, -1) }); },
   start() { send({ type: 'start' }); },
   choose(i) { sel = i; render(); },
   lock() { send({ type: 'pick', island: sel }); sel = null; },
-  next() { send({ type: 'next' }); },
   again() { send({ type: 'new' }); },
 };
 
@@ -107,7 +114,7 @@ const name = q => esc(V.players[q].name);
 const names = who => who.map(name).join(' & ');
 const you = q => (q === seat ? ' (you)' : '');
 const bot = b => (b ? ` <span class="muted">🤖 ${esc(b)}</span>` : '');
-const host = () => esc((waiting ? waiting[0].name : V.players[0].name) || 'the host');
+const hostName = () => esc((waiting ? waiting[host].name : V.players[host].name) || 'the host');
 const tokens = counts => counts.map((n, c) => n ? `<span class="t" style="background:${RULES.treasure[c].ink}">${RULES.treasure[c].mark}${n > 1 ? `×${n}` : ''}</span>` : '').join('') || '<span class="empty">empty</span>';
 const letters = counts => counts.map((n, c) => RULES.treasure[c].mark.repeat(n)).join('') || '–';
 const bestColour = p => { const n = Math.max(...p.haul), t = RULES.treasure[p.haul.indexOf(n)]; return `${n} ${n === 1 ? t.one : t.name}`; };
@@ -125,7 +132,7 @@ const roomCode = () => `<p class="muted" style="text-align: center; margin: 8px 
 const CHOICES = [['', 'Open for a person'], ...BOTS.personalities.map(p => [p.name, `🤖 ${p.name}`])];
 const dropdown = (q, b) => `<select onchange="act.seat(${q}, this.value)">${CHOICES.map(([v, label]) =>
   `<option value="${v}" ${v === (b ?? '') ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
-const hostLobby = () => roomCode() + waiting.map((s, q) => `<div class="seat"><b>Seat ${q + 1}</b> ${q === 0 ? 'You (host)'
+const hostLobby = () => roomCode() + waiting.map((s, q) => `<div class="seat"><b>Seat ${q + 1}</b> ${q === host ? 'You (host)'
   : s.name !== null && !s.bot ? esc(s.name) : dropdown(q, s.bot) + (s.bot ? '' : ' <span class="muted">waiting…</span>')}</div>`).join('')
   + `<div class="row" style="justify-content: center; margin-top: 8px">
     <button onclick="act.resize(-1)" ${waiting.length <= RULES.minPlayers ? 'disabled' : ''}>−</button> ${waiting.length} seats
@@ -166,7 +173,7 @@ function end() {
     if (!r) return '<td>–</td>'; // skipped: no island
     return `<td class="${esc(r.kind)}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
   }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table></div>
-  ${seat === 0 ? '<button class="big" onclick="act.again()">New game</button>' : `<p class="muted">Waiting for ${host()} to start a new game</p>`}`;
+  ${seat === host ? '<button class="big" onclick="act.again()">New game</button>' : `<p class="muted">Waiting for ${hostName()} to start a new game</p>`}`;
 }
 
 // The screen follows from the message (PIO2 03's table and PIO3 03's lobbies in the vault).
@@ -174,8 +181,8 @@ function screen() {
   if (seat === null && !joined) return waiting ? seatList() : board(); // Join: the form above, the room underneath
   if (V?.over) return board() + reveal() + end(); // Game over, for a seat or a spectator
   if (seat === null) return `<h2>Watching</h2><p class="muted">Every seat is taken.</p>${waiting ? seatList() : board() + (V.last ? reveal() : '')}`;
-  if (waiting) return seat === 0 ? hostLobby() : roomCode() + `<p>Waiting for ${host()} to start</p>${seatList()}`;
-  if (!roundOpen()) return board() + reveal() + '<button class="big" onclick="act.next()">Next round</button>';
+  if (waiting) return seat === host ? hostLobby() : roomCode() + `<p>Waiting for ${hostName()} to start</p>${seatList()}`;
+  if (!roundOpen()) return board() + reveal() + '<p class="muted">The next round starts by itself.</p>';
   if (V.myPick === null) return board() + pickView();
   return board(true) + `<h2>You picked ${L(V.myPick)}</h2><p class="muted">✓ = picked. Waiting for the others…</p>`;
 }
