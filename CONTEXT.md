@@ -33,6 +33,16 @@ _Avoid_: session, password
 The island a seat chooses for this round. Final once made.
 _Avoid_: choice, move, lock
 
+**Pick timer**:
+Online, the time every seat has to pick in one round (1 minute), shown as a bar shrinking across
+the top of every phone. The round resolves when every seat has picked or the timer runs out.
+_Avoid_: turn timer, clock
+
+**Next-round countdown**:
+Online, the time between rounds (15 seconds) while the reveal is on screen, shown as its own bar;
+the next round starts by itself when it ends. Pass and play has none: a button starts each round.
+_Avoid_: Next round button (pass and play only), break
+
 **Skipped**:
 A seat that has no pick when the round resolves (online, the pick timer ran out). It goes to no
 island: it takes nothing and doesn't count toward a crash.
