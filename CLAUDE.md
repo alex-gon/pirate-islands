@@ -35,6 +35,21 @@ when 2+ humans are seated.
   a dropdown per seat, − / + and Start, guests a waiting lobby, and only the host gets New game.
   The name and the seat token live in `sessionStorage` (a refresh rejoins); `localStorage` only
   prefills the name field. While visible, the page sends `ping` every 5 s.
+- **The page's game screens.** A bar fixed to the top edge shrinks smoothly from the message's
+  `timer.msLeft`, the seconds large under it: blue with the number alone for the pick timer, grey
+  `Next round in 12` for the countdown; none in the lobby or at game over. A skipped seat reads
+  `→ skipped (too slow)` (`skipped` in the game-over table), and the seat itself gets a red line. A
+  stand-in seat's card is dashed with `left · 🤖 playing`, and its picks carry 🤖 in the reveal and
+  the table (the room stamps each round's `standIns` on its history entry). A seat back mid-round
+  is told the bot picked for it. Guests get "Sam gone? Take over as host", which sends `seats`
+  unchanged in the lobby or `new` at game over. The watching screen says why a bot seat can't be
+  taken; a closed room or a refused code gives the setup screen back, the name filled in.
+- **Reconnecting.** The page never asks for a reload. When the socket closes, or a ping gets no
+  `pong` in 4 s, the last screen greys with "Reconnecting…" (after 30 s: "Is the Mac's server
+  running?") and the page reconnects: at once when it becomes visible, else 1, 2, 4… s apart up to
+  10 s while visible, forever. It drops its old socket unheard first, then rejoins by token. Never
+  after `room closed` or `no such room`. A tab whose seat a newer connection took forgets its
+  token and only watches.
 - **Rooms by code.** `POST /create` with `{ name }` makes a 5-character room code, saves the room
   with 3 open seats and that name on seat 0, and returns `{ code, token }`. The link is
   `http://localhost:8787/?room=CODE`; the room is `ws://localhost:8787/room/CODE`, and a code no

@@ -135,8 +135,13 @@ export class Room extends DurableObject {
     this.room.game = null;
   }
 
-  // Ends the round and sets the countdown, or none once the game is over.
-  resolve() { Rules.resolve(this.room.game); this.arm(this.room.game.winners ? null : "next"); }
+  // Ends the round, marks which seats a stand-in played (for the reveal and the game-over table), and sets
+  // the countdown, or none once the game is over.
+  resolve() {
+    const { game, standIns } = this.room;
+    Rules.resolve(game); game.history.at(-1).standIns = [...standIns];
+    this.arm(game.winners ? null : "next");
+  }
 
   standInsPick() {
     const { game, standIns } = this.room;
