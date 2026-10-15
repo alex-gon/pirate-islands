@@ -24,6 +24,11 @@ A seated person whose connection is gone when the pick timer runs out. Their sea
 **Stand-in**, never a skip. A connected person who is just slow is **Skipped** instead.
 _Avoid_: disconnected (a phone can disconnect and return within one round without dropping), left
 
+**Away**:
+In the **Lobby**, a seat whose **Seat token** holder isn't connected. The seat is kept for them
+until the **Host** frees it; then it is open, and their token no longer returns them to it.
+_Avoid_: dropped (that is only when the pick timer runs out), empty, open
+
 **Seat token**:
 The private proof, kept on one device, that a seat belongs to the person there. Only its holder
 can return to a seat; someone without it can only watch.

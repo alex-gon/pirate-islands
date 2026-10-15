@@ -5,7 +5,7 @@ import "../../rules.js"; // a classic script: sets globalThis.Rules
 const { Rules } = globalThis;
 
 const CODE = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no look-alikes: 0/O, 1/I/L
-const TYPES = ["join", "seats", "start", "pick", "new"], HOST = ["seats", "start", "new"];
+const TYPES = ["join", "seats", "free", "start", "pick", "new"], HOST = ["seats", "free", "start", "new"];
 const BOT = Rules.BOTS.personalities.map(p => p.name), { minPlayers, maxPlayers, pickTimer, nextTimer } = Rules.RULES;
 const ALIVE = 15000, LATE = 2000; // ms: connected = a ping answered this recently; an alarm this late restarts its phase
 const seed = () => crypto.getRandomValues(new Uint32Array(1))[0];
@@ -59,6 +59,7 @@ export class Room extends DurableObject {
   // a throwing alarm is retried, which could resolve a round twice (PIO4 02).
   async alarm() {
     const t = this.room?.timer, game = this.room?.game;
+    if (this.room && !game) return this.lobbyAlarm();
     if (!t || t.round !== game?.round) return;
     try {
       if (Date.now() > t.endsAt + LATE) this.arm(t.kind); // the server was down: start the phase again, so phones can return
@@ -76,21 +77,29 @@ export class Room extends DurableObject {
     } catch (e) { console.error(e); this.room = this.ctx.storage.kv.get("room") ?? null; }
   }
 
+  // The lobby has no timer, so its alarm looks every 5 s while anyone is here: a phone that goes silent
+  // without closing (locked, frozen) shows as away once it stops being connected. Only a change is sent,
+  // so the host's open dropdown isn't redrawn.
+  lobbyAlarm() {
+    const { bots, tokens } = this.room, away = bots.map((bot, q) => !bot && !!tokens[q] && !this.connected(q)).join();
+    if (away !== this.away) for (const ws of this.open()) this.send(ws);
+    this.away = away;
+    if (this.open().length) this.ctx.storage.setAlarm(Date.now() + 5000);
+  }
+
   // Applies one message from ws, or returns a short reason to refuse it.
   handle(ws, data) {
     let msg; try { msg = JSON.parse(data); } catch {}
     if (typeof data !== "string" || data.length > 1024) return "message too long";
     if (!TYPES.includes(msg?.type)) return "unknown message";
-    const { seat } = ws.deserializeAttachment(), { names, bots, tokens, game } = this.room;
+    const { seat } = ws.deserializeAttachment(), { names, tokens, game } = this.room;
     if (msg.type === "join") { // { name, token? }
       if (seat !== null) return "already seated";
       if (typeof msg.name !== "string") return "name must be text";
-      // The token's seat, its older connection now watching; else the lowest open seat no token holds; else a spectator.
-      const name = msg.name.trim().slice(0, 20);
-      let q = typeof msg.token === "string" ? tokens.indexOf(msg.token) : -1;
+      // The token's seat, its older connection now watching; else a spectator, whom save() seats in the lobby if it can.
+      const name = msg.name.trim().slice(0, 20), q = typeof msg.token === "string" ? tokens.indexOf(msg.token) : -1;
       if (q >= 0) this.open().filter(o => o.deserializeAttachment().seat === q).forEach(o => o.serializeAttachment({ seat: null, displaced: true }));
-      else if ((q = bots.findIndex((bot, i) => !bot && !tokens[i])) >= 0) tokens[q] = newToken();
-      ws.serializeAttachment({ seat: q >= 0 ? q : null, at: Date.now() });
+      ws.serializeAttachment({ seat: q >= 0 ? q : null, at: Date.now(), name });
       if (q >= 0 && !game) names[q] = name || `Player ${q + 1}`; // during a game the seat keeps its saved name
       return;
     }
@@ -121,18 +130,31 @@ export class Room extends DurableObject {
       Object.assign(this.room, { bots: b, names: b.map((bot, q) => (bot ? "" : names[q] || null)), tokens: b.map((bot, q) => (bot ? null : tokens[q] ?? null)) });
       return;
     }
+    if (msg.type === "free") { // { seat }: an away seat's token stops working, and the seat is open
+      const q = msg.seat;
+      if (game) return "the game has started";
+      if (!Number.isInteger(q) || !tokens[q]) return "that seat isn't held";
+      if (this.connected(q)) return "someone is sitting there";
+      this.unseat(q);
+      return;
+    }
     if (msg.type === "start") {
       if (game) return "the game has started";
-      const empty = bots.findIndex((bot, q) => !bot && !this.taken().has(q)); // neither a bot nor a connected person
-      if (empty >= 0) return `Seat ${empty + 1} is empty`;
+      const empty = bots.findIndex((bot, q) => !bot && !this.connected(q)); // neither a bot nor a connected person
+      if (empty >= 0) return tokens[empty] ? `${names[empty]} is away` : `Seat ${empty + 1} is empty`;
       Object.assign(this.room, { game: Rules.newGame(names, bots, seed()), timers: { pick: pickTimer, next: nextTimer }, standIns: bots.map(() => false) });
       this.arm("pick");
       return;
     }
     if (!game?.winners) return "the game isn't over"; // "new": back to the lobby
-    const taken = this.taken();
-    standIns.forEach((s, q) => { if (s && !taken.has(q)) tokens[q] = names[q] = null; }); // a stand-in's seat is open again
+    standIns.forEach((s, q) => s && !this.connected(q) && this.unseat(q)); // a stand-in's seat is open again
     this.room.game = null;
+  }
+
+  // Seat q is open: its token stops working, and a silent connection still in it watches.
+  unseat(q) {
+    this.open().filter(o => o.deserializeAttachment().seat === q).forEach(o => o.serializeAttachment({ seat: null }));
+    this.room.tokens[q] = this.room.names[q] = null;
   }
 
   // Ends the round, marks which seats a stand-in played (for the reveal and the game-over table), and sets
@@ -163,16 +185,31 @@ export class Room extends DurableObject {
   }
 
   save() {
+    if (!this.room.game) { this.seatSpectators(); this.ctx.storage.setAlarm(Date.now() + 5000); } // see lobbyAlarm()
     this.ctx.storage.kv.put("room", this.room);
     for (const ws of this.open()) this.send(ws);
   }
 
-  // { seat, view, standIns } once the game exists, else { seat, waiting }; always host and timer
-  // ({ kind, msLeft } or null); token to the seat's own connection only; error for a refusal.
+  // In the lobby, each open seat no token holds goes to the spectator who sent join earliest. A spectator
+  // that never sent join (or was displaced or freed) has no name, and stays watching.
+  seatSpectators() {
+    const { names, bots, tokens } = this.room;
+    const joined = this.open().map(ws => [ws, ws.deserializeAttachment()]).filter(([, a]) => a.seat === null && a.name !== undefined);
+    for (const [ws, a] of joined.sort(([, a], [, b]) => a.at - b.at)) {
+      const q = bots.findIndex((bot, i) => !bot && !tokens[i]);
+      if (q < 0) return;
+      tokens[q] = newToken(); names[q] = a.name || `Player ${q + 1}`;
+      ws.serializeAttachment({ ...a, seat: q });
+    }
+  }
+
+  // { seat, view, standIns } once the game exists, else { seat, waiting }: each seat's name once a token
+  // holds it, and away if its holder isn't connected. Always host and timer ({ kind, msLeft } or null);
+  // token to the seat's own connection only; error for a refusal.
   send(ws, error) {
-    const { seat, displaced } = ws.deserializeAttachment(), { names, bots, tokens, host, game, standIns, timer } = this.room, taken = this.taken();
+    const { seat, displaced } = ws.deserializeAttachment(), { names, bots, tokens, host, game, standIns, timer } = this.room;
     const out = game ? { seat, view: Rules.viewFor(game, seat), standIns }
-      : { seat, waiting: bots.map((bot, q) => ({ name: bot || taken.has(q) ? names[q] : null, bot })) };
+      : { seat, waiting: bots.map((bot, q) => ({ name: bot || tokens[q] ? names[q] : null, bot, away: !bot && !!tokens[q] && !this.connected(q) })) };
     Object.assign(out, { host, timer: timer && { kind: timer.kind, msLeft: Math.max(0, timer.endsAt - Date.now()) } });
     if (seat !== null) out.token = tokens[seat];
     error ??= displaced && "your seat is on another tab or phone";
@@ -180,7 +217,6 @@ export class Room extends DurableObject {
   }
 
   open() { return this.ctx.getWebSockets().filter(ws => ws.readyState === WebSocket.OPEN); }
-  taken() { return new Set(this.open().map(ws => ws.deserializeAttachment().seat)); }
 
   // A connection in seat q joined or answered a ping in the last ALIVE ms. An open socket alone isn't
   // proof: a frozen phone keeps one open (PIO4 01).

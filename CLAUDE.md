@@ -60,9 +60,14 @@ when 2+ humans are seated.
 - **Seat tokens.** The room makes one when it gives a person a seat and sends it only to that
   connection. `join` is `{ name, token? }`: a matching token returns to its seat (the older
   connection there becomes a spectator, told why), else the lowest open seat no token holds, else
-  watching. A token holds its seat in the lobby too, until the host makes it a bot or removes it.
+  watching. A token holds its seat in the lobby too, until the host makes it a bot, removes it or
+  frees it. The lobby's `waiting` names every held seat, and marks it `away` when its holder isn't
+  connected (the lobby's alarm looks every 5 s, so a locked phone shows too): everyone sees "Cat · away", the host gets Free seat, a spectator is told the seat is
+  kept for Cat, and Start refuses with "Cat is away". In the lobby, a spectator who sent `join` gets
+  the next seat to open (earliest join first), with no reload.
 - **The host** is a seat, `room.host` (seat 0 at create). Only the host sends `seats` (3–5 entries,
-  each open or a bot), `start` and `new`, which returns to the lobby; while the host is away, any
+  each open or a bot), `free` (`{ seat }`: an away seat's token stops working and the seat is open),
+  `start` and `new`, which returns to the lobby; while the host is away, any
   seated person may, and becomes the host. **Connected** means a ping answered (the room's
   automatic `pong`) or a join in the last 15 s; an open socket alone isn't enough.
 - **Timers.** `pickTimer` and `nextTimer` in `RULES` (60 and 15 s) are copied into the room at
@@ -71,8 +76,8 @@ when 2+ humans are seated.
   An alarm more than 2 s late (the server was down) restarts its phase instead.
 - **Stand-ins.** At the pick timer, a seat without a pick is skipped if connected, and dropped if
   not: `room.standIns` marks it, and Sneaky picks for it then and at each round start. It ends at
-  the next round once its token holder is connected, and at New game a stand-in seat nobody holds
-  is open. If every person seat has a stand-in, the room closes: its storage is deleted, every
+  the next round once its token holder is connected, and at New game a stand-in seat whose holder
+  isn't connected is open. If every person seat has a stand-in, the room closes: its storage is deleted, every
   connection gets `room closed`, and its code names no room.
 
 ## Where the planning lives

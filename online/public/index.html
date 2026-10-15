@@ -64,7 +64,7 @@
 <script src="rules.js"></script>
 <script>
 // The online page: one tab, one seat. The game runs only in the room (online/src/room.js); this page
-// draws the room's last message and sends join, seats, start, pick and new. From rules.js it
+// draws the room's last message and sends join, seats, free, start, pick and new. From rules.js it
 // reads only RULES and the bots' names.
 const { RULES, BOTS } = Rules;
 const LETTERS = 'ABCDE';
@@ -156,6 +156,7 @@ const act = {
   go() { const name = named(); if (name) { keep(name); location.href = `/?room=${$('setup').elements.code.value}`; } },
   join(name) { keep(name); joined = true; $('join').hidden = true; send({ type: 'join', name, token: recall('sessionStorage', 'token') ?? undefined }); },
   seat(q, bot) { send({ type: 'seats', bots: waiting.map((s, i) => (i === q ? bot || null : s.bot)) }); },
+  free(q) { send({ type: 'free', seat: q }); },
   resize(by) { const bots = waiting.map(s => s.bot); send({ type: 'seats', bots: by > 0 ? [...bots, null] : bots.slice(0, -1) }); },
   start() { send({ type: 'start' }); },
   choose(i) { sel = i; render(); },
@@ -177,19 +178,22 @@ const bestColour = p => { const n = Math.max(...p.haul), t = RULES.treasure[p.ha
 const roundOpen = () => !V.last || V.last.round !== V.round;
 const takeOver = () => (seat === null ? '' : `<button class="small" onclick="act.takeOver()">${hostName()} gone? Take over as host</button>`);
 
-// Before the game: every seat by name, a bot as "Player N 🤖 Greedy", or not yet joined.
+// Before the game: every seat by name, a bot as "Player N 🤖 Greedy", or not yet joined. An away seat is kept for its person.
+const away = s => (s.away ? ' <span class="muted">· away</span>' : '');
 const seatList = () => `<div class="row">${waiting.map((s, q) => `<div class="card ${q === seat ? 'you' : ''}">${s.name === null
-  ? '<span class="muted">not yet joined</span>' : esc(s.name || `Player ${q + 1}`) + you(q)}${bot(s.bot)}</div>`).join('')}</div>`;
+  ? '<span class="muted">not yet joined</span>' : esc(s.name || `Player ${q + 1}`) + you(q) + away(s)}${bot(s.bot)}</div>`).join('')}</div>`;
+const kept = () => waiting.map((s, q) => (s.away ? `Seat ${q + 1} is kept for ${esc(s.name)}. ` : '')).join('');
 
 // The code, big enough to read across a table, and the full link to select.
 const roomCode = () => `<p class="muted" style="text-align: center; margin: 8px 0 0">Room</p><p class="code">${esc(code)}</p>
   <p class="muted link">${esc(location.origin)}/?room=${esc(code)}</p>`;
 
-// The host's lobby: a dropdown for every seat no connected person holds; every change sends seats at once.
+// The host's lobby: a dropdown for every seat no token holds, Free seat for an away one; every change sends at once.
 const CHOICES = [['', 'Open for a person'], ...BOTS.personalities.map(p => [p.name, `🤖 ${p.name}`])];
 const dropdown = (q, b) => `<select onchange="act.seat(${q}, this.value)">${CHOICES.map(([v, label]) =>
   `<option value="${v}" ${v === (b ?? '') ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
 const hostLobby = () => roomCode() + waiting.map((s, q) => `<div class="seat"><b>Seat ${q + 1}</b> ${q === host ? 'You (host)'
+  : s.away ? `${esc(s.name)}${away(s)} <button class="small" onclick="act.free(${q})">Free seat</button>`
   : s.name !== null && !s.bot ? esc(s.name) : dropdown(q, s.bot) + (s.bot ? '' : ' <span class="muted">waiting…</span>')}</div>`).join('')
   + `<div class="row" style="justify-content: center; margin-top: 8px">
     <button onclick="act.resize(-1)" ${waiting.length <= RULES.minPlayers ? 'disabled' : ''}>−</button> ${waiting.length} seats
@@ -238,7 +242,8 @@ function end() {
 function screen() {
   if (seat === null && !joined) return waiting ? seatList() : board(); // Join: the form above, the room underneath
   if (V?.over) return board() + reveal() + end(); // Game over, for a seat or a spectator
-  if (seat === null) return `<h2>Watching</h2><p class="muted">${displaced ? 'Your seat is now on another tab or phone. This one is watching.' : 'Every seat is taken.'}
+  if (seat === null) return `<h2>Watching</h2><p class="muted">${displaced ? 'Your seat is now on another tab or phone. This one is watching.'
+    : waiting ? (kept() || 'Every seat is taken. ') + "You'll get a seat if one opens." : 'Every seat is taken.'}
     ${standIns.some(Boolean) ? 'A seat a bot is playing can only go back to the phone that left it.' : ''}</p>${waiting ? seatList() : board() + (V.last ? reveal() : '')}`;
   if (waiting) return seat === host ? hostLobby() : roomCode() + `<p>Waiting for ${hostName()} to start</p>${takeOver()}${seatList()}`;
   if (!roundOpen()) return board() + reveal();
