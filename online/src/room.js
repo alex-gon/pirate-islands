@@ -101,6 +101,7 @@ export class Room extends DurableObject {
       if (q >= 0) this.open().filter(o => o.deserializeAttachment().seat === q).forEach(o => o.serializeAttachment({ seat: null, displaced: true }));
       ws.serializeAttachment({ seat: q >= 0 ? q : null, at: Date.now(), name });
       if (q >= 0 && !game) names[q] = name || `Player ${q + 1}`; // during a game the seat keeps its saved name
+      if (q >= 0 && game?.winners) this.room.standIns[q] = false; // back at game over: no next round would clear it
       return;
     }
     if (seat === null) return "you have no seat";

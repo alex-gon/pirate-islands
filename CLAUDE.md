@@ -76,7 +76,8 @@ when 2+ humans are seated.
   An alarm more than 2 s late (the server was down) restarts its phase instead.
 - **Stand-ins.** At the pick timer, a seat without a pick is skipped if connected, and dropped if
   not: `room.standIns` marks it, and Sneaky picks for it then and at each round start. It ends at
-  the next round once its token holder is connected, and at New game a stand-in seat whose holder
+  the next round once its token holder is connected (at game over, as soon as they rejoin; the
+  rounds it played keep their 🤖), and at New game a stand-in seat whose holder
   isn't connected is open. If every person seat has a stand-in, the room closes: its storage is deleted, every
   connection gets `room closed`, and its code names no room.
 
