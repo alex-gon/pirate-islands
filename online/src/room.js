@@ -55,7 +55,7 @@ export class Room extends DurableObject {
   // The others hear that the seat is free. A plain close: 1005 and 1006 can't be sent back.
   webSocketClose(ws) { ws.close(); if (this.room) for (const other of this.open()) this.send(other); }
 
-  // The pick timer or the countdown ran out. It acts only on the timer it saved, and never throws:
+  // The pick timer or the reveal pause ran out. It acts only on the timer it saved, and never throws:
   // a throwing alarm is retried, which could resolve a round twice (PIO4 02).
   async alarm() {
     const t = this.room?.timer, game = this.room?.game;
@@ -159,7 +159,7 @@ export class Room extends DurableObject {
   }
 
   // Ends the round, marks which seats a stand-in played (for the reveal and the game-over table), and sets
-  // the countdown, or none once the game is over.
+  // the reveal pause, or none once the game is over.
   resolve() {
     const { game, standIns } = this.room;
     Rules.resolve(game); game.history.at(-1).standIns = [...standIns];

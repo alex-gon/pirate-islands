@@ -31,13 +31,17 @@ when 2+ humans are seated.
   wrangler prints, so phones on the same network can play.
 - **The page's screens.** `/` is the setup screen: one name, Create a room, Join by code, and
   **Pass and play**, a link to `/hotseat`. That is `online/public/hotseat.html`, a symlink to the
-  root `index.html`, which stays untouched. `/?room=CODE` skips setup; the host gets the code large,
-  a dropdown per seat, − / + and Start, guests a waiting lobby, and only the host gets New game.
+  root `index.html` (no timers; its pick screen shows the Last round block). `/?room=CODE` skips
+  setup; the host gets the code large, a dropdown per seat, − / + and Start, guests a waiting
+  lobby, and only the host gets New game.
   The name and the seat token live in `sessionStorage` (a refresh rejoins); `localStorage` only
   prefills the name field. While visible, the page sends `ping` every 5 s.
-- **The page's game screens.** A bar fixed to the top edge shrinks smoothly from the message's
-  `timer.msLeft`, the seconds large under it: blue with the number alone for the pick timer, grey
-  `Next round in 12` for the countdown; none in the lobby or at game over. A skipped seat reads
+- **The page's game screens.** For the pick timer only, a blue bar fixed to the top edge shrinks
+  smoothly from the message's `timer.msLeft`, the seconds large under it; nothing during the reveal
+  pause, in the lobby or at game over. While a round is open, the pick, picked and welcome-back
+  screens show a **Last round** block under the hauls, one line per player from `view.last`
+  (`Ann → B: raided alone, took …`, `💥 crash with Cat`, `skipped (too slow)`, 🤖 for a stand-in),
+  their own bold, red if skipped; the hotseat shows the same block under Lock in. A skipped seat reads
   `→ skipped (too slow)` (`skipped` in the game-over table), and the seat itself gets a red line. A
   stand-in seat's card is dashed with `left · 🤖 playing`, and its picks carry 🤖 in the reveal and
   the table (the room stamps each round's `standIns` on its history entry). A seat back mid-round
@@ -70,9 +74,9 @@ when 2+ humans are seated.
   `start` and `new`, which returns to the lobby; while the host is away, any
   seated person may, and becomes the host. **Connected** means a ping answered (the room's
   automatic `pong`) or a join in the last 15 s; an open socket alone isn't enough.
-- **Timers.** `pickTimer` and `nextTimer` in `RULES` (60 and 15 s) are copied into the room at
+- **Timers.** `pickTimer` and `nextTimer` in `RULES` (60 and 5 s) are copied into the room at
   Start and run on its one alarm, guarded by the saved `room.timer`. A round resolves when every
-  seat has picked or the pick timer runs out; then the countdown starts the next round by itself.
+  seat has picked or the pick timer runs out; then the reveal pause starts the next round by itself.
   An alarm more than 2 s late (the server was down) restarts its phase instead.
 - **Stand-ins.** At the pick timer, a seat without a pick is skipped if connected, and dropped if
   not: `room.standIns` marks it, and Sneaky picks for it then and at each round start. It ends at

@@ -79,12 +79,20 @@ function resultLine(r, i) {
   return `<p class="empty"><b>${L(i)}:</b> Nobody came. Now: ${tokens(r.after)}</p>`;
 }
 
+// Last round, under the pick screen's Lock in: one line per player, as its reveal said (PIO4 10). No skips here.
+const lastRound = () => S.round === 1 ? '' : `<p class="muted">Last round</p>${S.history.at(-1).picks.map((isl, q) => {
+  const r = S.history.at(-1).results[isl], line = `${name(q)} → ${L(isl)}: ${r.kind === 'raid' ? `raided alone, took ${tokens(r.before)}`
+    : `💥 crash with ${names(r.who.filter(w => w !== q))}`}`;
+  return `<p>${q === turn ? `<b>${line}</b>` : line}</p>`;
+}).join('')}`;
+
 const views = {
   pass: () => `<div class="cover"><p>Round ${S.round}: pass the device to</p><h2>${name(turn)}</h2>
     <p>Everyone else, look away!</p><button class="big" onclick="act.show()">I'm ${name(turn)}, show islands</button></div>`,
   pick: () => `<h2>${name(turn)}, choose an island</h2>
     <div class="row">${S.islands.map((pile, i) => `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
-    <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>`,
+    <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>
+    ${lastRound()}`,
   reveal: () => `<h2>Reveal!</h2>
     <p>${S.history.at(-1).picks.map((isl, q) => `<b>${name(q)}</b> → ${isl === null ? 'no island' : L(isl)}`).join(' · ')}</p>
     ${S.history.at(-1).results.map(resultLine).join('')}

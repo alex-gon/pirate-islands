@@ -29,11 +29,11 @@
   .card.left { border-style: dashed; } /* a stand-in plays this seat */
   button.small { font-size: 15px; padding: 6px 10px; background: none; color: #1d5c7a; border: 1px solid #1d5c7a; }
   fieldset:disabled #app { opacity: 0.45; } /* lost the room: the last screen, greyed */
-  /* The pick timer (blue) or next-round countdown (grey): a bar along the top edge, the seconds under it */
+  /* The pick timer: a bar along the top edge, the seconds under it */
   #clock { position: fixed; top: 0; left: 0; right: 0; background: #f4efe3; }
-  #bar { height: 20px; background: #1d5c7a; } #clock.next #bar { background: #8a8a8a; }
+  #bar { height: 20px; background: #1d5c7a; }
   #secs { max-width: 560px; margin: 0 auto; padding: 0 16px; font-size: 22px; line-height: 52px; color: #1d5c7a; }
-  #secs b { font-size: 40px; } #clock.next #secs { color: #666; }
+  #secs b { font-size: 40px; }
   body.timed { padding-top: 88px; }
 </style>
 </head>
@@ -125,21 +125,22 @@ if (code) {
 }
 
 // The bar shrinks smoothly from the msLeft in the room's last message; the seconds count down from it.
+// Only the pick timer is shown: the 5 s reveal pause has nothing on screen (PIO4 10).
 let deadline;
+const picking = () => timer?.kind === 'pick';
 function drawClock() {
-  $('clock').hidden = !timer; document.body.classList.toggle('timed', !!timer);
-  if (!timer) return;
-  const bar = $('bar'), full = RULES[`${timer.kind}Timer`] * 1000;
-  deadline = Date.now() + timer.msLeft; $('clock').className = timer.kind;
+  $('clock').hidden = !picking(); document.body.classList.toggle('timed', picking());
+  if (!picking()) return;
+  const bar = $('bar'), full = RULES.pickTimer * 1000;
+  deadline = Date.now() + timer.msLeft;
   bar.style.transition = 'none'; bar.style.width = `${Math.min(100, (100 * timer.msLeft) / full)}%`;
   bar.offsetWidth; // the shrink starts from this width
   bar.style.transition = `width ${timer.msLeft}ms linear`; bar.style.width = '0';
   tick();
 }
 function tick() {
-  if (!timer) return;
-  const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-  $('secs').innerHTML = timer.kind === 'pick' ? `<b>${s}</b>` : `Next round in <b>${s}</b>`;
+  if (!picking()) return;
+  $('secs').innerHTML = `<b>${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}</b>`;
 }
 setInterval(tick, 250);
 
@@ -219,6 +220,13 @@ const reveal = () => `${V.last.picks[seat] === null ? '<p class="crash"><b>Time 
   ${V.last.results.map(resultLine).join('')}
   ${V.bagOut ? `<p class="crash"><b>The bag can't refill every island: the game ends!</b></p>` : ''}`;
 
+// While a round is open, V.last is the round before: one line per player, as its reveal said (PIO4 10).
+const lastRound = () => V.last ? `<p class="muted">Last round</p>${V.last.picks.map((isl, q) => {
+  const r = V.last.results[isl], line = `${name(q)}${you(q)}${V.last.standIns?.[q] ? ' 🤖' : ''} → ${!r ? 'skipped (too slow)'
+    : `${L(isl)}: ${r.kind === 'raid' ? `raided alone, took ${tokens(r.before)}` : `💥 crash with ${names(r.who.filter(w => w !== q))}`}`}`;
+  return `<p class="${q === seat && !r ? 'crash' : ''}">${q === seat ? `<b>${line}</b>` : line}</p>`;
+}).join('')}` : '';
+
 const pickView = () => `<h2>Choose an island</h2>
   <div class="row">${V.islands.map((pile, i) => `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
   <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>`;
@@ -247,10 +255,10 @@ function screen() {
     ${standIns.some(Boolean) ? 'A seat a bot is playing can only go back to the phone that left it.' : ''}</p>${waiting ? seatList() : board() + (V.last ? reveal() : '')}`;
   if (waiting) return seat === host ? hostLobby() : roomCode() + `<p>Waiting for ${hostName()} to start</p>${takeOver()}${seatList()}`;
   if (!roundOpen()) return board() + reveal();
-  if (standIns[seat]) return board(true) + `<h2>Welcome back!</h2><p>A bot is playing your seat this round. You play again from the next round.</p>
+  if (standIns[seat]) return board(true) + lastRound() + `<h2>Welcome back!</h2><p>A bot is playing your seat this round. You play again from the next round.</p>
     ${V.myPick === null ? '' : `<p>The bot picked ${L(V.myPick)} for you.</p>`}`; // returned mid-round: the stand-in has already picked
-  if (V.myPick === null) return board() + pickView();
-  return board(true) + `<h2>You picked ${L(V.myPick)}</h2><p class="muted">✓ = picked. Waiting for the others…</p>`;
+  if (V.myPick === null) return board() + lastRound() + pickView();
+  return board(true) + lastRound() + `<h2>You picked ${L(V.myPick)}</h2><p class="muted">✓ = picked. Waiting for the others…</p>`;
 }
 
 function render() {

@@ -16,7 +16,7 @@ const RULES = {
   refill: 1,     // tokens drawn onto every island that didn't crash; a bag too short to refill them all ends the game
   winAt: 5,      // of one colour, checked after each round. Ties: most of own best colour → most colours → most pieces → share
   minPlayers: 3, maxPlayers: 5,
-  pickTimer: 60, nextTimer: 15, // online only, in seconds: to pick, then between rounds. A room copies them at Start
+  pickTimer: 60, nextTimer: 5, // online only, in seconds: to pick, then the reveal pause. A room copies them at Start
 };
 // ---- Bots: tuning for computer seats. A bot reads only public info: piles, hauls, last round's reveal ----
 const BOTS = {
