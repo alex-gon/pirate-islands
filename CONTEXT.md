@@ -132,6 +132,8 @@ _Avoid_: hotseat (the code's nickname for its page, never a word players read), 
   its **Room code** names no room any more.
 - A **Room** also closes when it has **expired**, whatever its phase: a finished game, a lobby left
   open, or a game where no one picks any more.
+- One connection (one address) can make at most 10 **Rooms** an hour; after that it can still join
+  a **Room** by its **Room code**.
 
 ## Example dialogue
 

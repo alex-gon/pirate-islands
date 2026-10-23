@@ -25,6 +25,7 @@
   input, select { font: inherit; padding: 8px; margin: 3px 0; box-sizing: border-box; } input { flex: 1; min-width: 0; }
   .code { font-size: 48px; font-weight: bold; letter-spacing: 0.15em; text-align: center; margin: 0; }
   .link { text-align: center; user-select: all; overflow-wrap: anywhere; margin-top: 0; }
+  .qr svg { display: block; width: 160px; height: 160px; margin: 0 auto 8px; }
   .seat { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #ddd; }
   .card.left { border-style: dashed; } /* a stand-in plays this seat */
   button.small { font-size: 15px; padding: 6px 10px; background: none; color: #1d5c7a; border: 1px solid #1d5c7a; }
@@ -62,6 +63,7 @@
   <div id="app"><p class="muted">Finding the room…</p></div>
 </fieldset>
 <script src="rules.js"></script>
+<script src="qrcode.js"></script> <!-- qrcode-generator 2.0.4, MIT: qrcode-LICENSE.txt -->
 <script>
 // The online page: one tab, one seat. The game runs only in the room (online/src/room.js); this page
 // draws the room's last message and sends join, seats, free, start, pick and new. From rules.js it
@@ -73,7 +75,7 @@ const $ = id => document.getElementById(id);
 
 let seat, waiting, V, error, host, timer, standIns = []; // the room's last message, drawn as it is: the page keeps no game of its own
 let sel = null, joined = false; // the island selected but not locked in; whether this tab sent join
-// lost: when the connection dropped, null while connected. gone: 'no such room' or 'room closed', never retried.
+// lost: when the connection dropped, null while connected. gone: 'no such room', 'room closed' or 'room expired', never retried.
 // displaced: a newer connection took this tab's seat, so it forgot its token and only watches.
 let lost = null, gone = null, displaced = false;
 
@@ -92,24 +94,24 @@ const send = msg => ws.send(JSON.stringify(msg));
 function connect() {
   clearTimeout(retry); clearTimeout(watchdog); watchdog = null;
   if (ws) { ws.onclose = ws.onmessage = null; ws.close(); } // the old socket is dropped unheard, so it can't displace this one
-  ws = new WebSocket(`ws://${location.host}/room/${encodeURIComponent(code)}`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/room/${encodeURIComponent(code)}`);
   ws.onopen = () => { tries = 0; const saved = recall('sessionStorage'); if ((rejoining = saved !== null && !displaced)) act.join(saved); };
   ws.onmessage = e => {
     if (e.data === 'pong') { clearTimeout(watchdog); watchdog = null; return; }
     const m = JSON.parse(e.data);
     if (rejoining && !m.error) { rejoining = false; if (m.seat === null) return; } // the room's hello, sent before it reads our join
     lost = null;
-    if (m.error === 'no such room' || m.error === 'room closed') gone = m.error, timer = null;
+    if (['no such room', 'room closed', 'room expired'].includes(m.error)) gone = m.error, timer = null;
     else ({ seat, waiting, view: V, error, host, timer, standIns = [] } = m);
     if (error === 'your seat is on another tab or phone') displaced = true, error = null, keepToken(null);
     if (m.token) keepToken(m.token);
-    drawClock(); render();
+    drawClock(); render(); keepAwake();
   };
   ws.onclose = lose;
 }
 function lose() {
   if (gone) return;
-  lost ??= Date.now(); render(); setTimeout(render, 30000); // then the banner asks after the server
+  lost ??= Date.now(); render(); setTimeout(render, 30000); // then the banner says it's still trying
   clearTimeout(retry);
   if (document.visibilityState === 'visible') retry = setTimeout(connect, Math.min(10000, 1000 * 2 ** tries++));
 }
@@ -121,7 +123,20 @@ function ping() {
 if (code) {
   connect();
   setInterval(() => document.visibilityState === 'visible' && ping(), 5000);
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && (lost ? connect() : ping()));
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && (lost ? connect() : ping(), keepAwake()));
+  document.addEventListener('click', keepAwake); // an iPhone grants it only from a tap
+}
+
+// Wake Lock (PIO5 03): the screen stays on while this page is in a room, lobby or game, and lets go at game
+// over and on leaving. Only over https (on the Wi-Fi's http address it doesn't exist); refusals are ignored
+// and nothing is shown. The browser lets go whenever the page is hidden, so it is asked again on return.
+let lock = null, asking = false;
+function keepAwake() {
+  if (!('wakeLock' in navigator)) return;
+  if (gone || V?.over) { lock?.release().catch(() => {}); lock = null; return; }
+  if (asking || (lock && !lock.released) || document.visibilityState !== 'visible') return;
+  asking = true;
+  navigator.wakeLock.request('screen').then(l => { lock = l; }, () => {}).finally(() => { asking = false; });
 }
 
 // The bar shrinks smoothly from the msLeft in the room's last message; the seconds count down from it.
@@ -150,9 +165,11 @@ const act = {
   async create() {
     const name = named(); if (!name) return;
     try {
-      const { code, token } = await (await fetch('/create', { method: 'POST', body: JSON.stringify({ name }) })).json();
+      const res = await fetch('/create', { method: 'POST', body: JSON.stringify({ name }) });
+      if (res.status === 429) return ($('note').innerHTML = '<p class="crash">Too many new rooms from this connection. Try again in an hour, or join a room by its code.</p>');
+      const { code, token } = await res.json();
       keep(name); keepToken(token); location.href = `/?room=${code}`; // one way into a room: the link, which joins seat 0 by its token
-    } catch { $('note').innerHTML = `<p class="crash">Couldn't make a room. Is the Mac's server running?</p>`; }
+    } catch { $('note').innerHTML = `<p class="crash">Couldn't make a room. Check your connection.</p>`; }
   },
   go() { const name = named(); if (name) { keep(name); location.href = `/?room=${$('setup').elements.code.value}`; } },
   join(name) { keep(name); joined = true; $('join').hidden = true; send({ type: 'join', name, token: recall('sessionStorage', 'token') ?? undefined }); },
@@ -185,9 +202,13 @@ const seatList = () => `<div class="row">${waiting.map((s, q) => `<div class="ca
   ? '<span class="muted">not yet joined</span>' : esc(s.name || `Player ${q + 1}`) + you(q) + away(s)}${bot(s.bot)}</div>`).join('')}</div>`;
 const kept = () => waiting.map((s, q) => (s.away ? `Seat ${q + 1} is kept for ${esc(s.name)}. ` : '')).join('');
 
-// The code, big enough to read across a table, and the full link to select.
+// The code, big enough to read across a table, the full link to select, and the link as a QR code for a
+// camera (made once: the link never changes).
+const link = `${location.origin}/?room=${code}`;
+let qrSvg;
+const qr = () => { if (!qrSvg) { const q = qrcode(0, 'M'); q.addData(link); q.make(); qrSvg = q.createSvgTag({ cellSize: 4, margin: 16, scalable: true }); } return qrSvg; };
 const roomCode = () => `<p class="muted" style="text-align: center; margin: 8px 0 0">Room</p><p class="code">${esc(code)}</p>
-  <p class="muted link">${esc(location.origin)}/?room=${esc(code)}</p>`;
+  <p class="muted link">${esc(link)}</p><div class="qr">${qr()}</div>`;
 
 // The host's lobby: a dropdown for every seat no token holds, Free seat for an away one; every change sends at once.
 const CHOICES = [['', 'Open for a person'], ...BOTS.personalities.map(p => [p.name, `🤖 ${p.name}`])];
@@ -265,8 +286,9 @@ function render() {
   const setup = !code || gone; // a refused code or a closed room gets the setup screen back, the name filled in
   $('setup').hidden = !setup; $('room').hidden = setup;
   if (gone === 'no such room') $('setup').elements.code.value = code.slice(0, 5);
-  $('note').innerHTML = gone ? `<p class="crash"><b>${gone === 'room closed' ? `Room ${esc(code)} has closed: every player had left.` : `There's no room ${esc(code)}. Check the code.`}</b></p>`
-    : (lost ? `<p class="muted"><b>Reconnecting…</b>${Date.now() - lost > 30000 ? " Is the Mac's server running?" : ''}</p>` : '') + (error ? `<p class="crash">${esc(error)}</p>` : '');
+  const why = { 'room closed': `Room ${esc(code)} has closed: every player had left.`, 'room expired': `Room ${esc(code)} closed after 2 hours with no moves.` };
+  $('note').innerHTML = gone ? `<p class="crash"><b>${why[gone] ?? `There's no room ${esc(code)}. Check the code.`}</b></p>`
+    : (lost ? `<p class="muted"><b>Reconnecting…</b>${Date.now() - lost > 30000 ? ' Still trying. Check your connection.' : ''}</p>` : '') + (error ? `<p class="crash">${esc(error)}</p>` : '');
   if (setup) return;
   $('title').textContent = `Room ${code}`;
   $('room').disabled = !!lost;

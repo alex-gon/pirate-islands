@@ -21,21 +21,43 @@ when 2+ humans are seated.
   bot-only games on `rules.js` and fails if a game throws, runs past 100 rounds, or `viewFor` shows
   a seat the bag, another seat's pick this round, or the history before the end. Some games skip
   seats; the last 100 use a small bag so it runs out. Run it after any change to `rules.js`.
-- **`online/`: the one folder with dependencies.** Rooms for playing in browser tabs on this
-  Mac: a Cloudflare Worker with one Durable Object per room, `online/src/room.js`, that holds the
+- **`online/`: the one folder with dependencies.** Rooms for playing on phones and in browser tabs:
+  a Cloudflare Worker with one Durable Object per room, `online/src/room.js`, that holds the
   real game on `rules.js` and sends each connection only `viewFor` its own seat. `online/package.json`
-  holds only `wrangler`; nothing else is added without a reason. Run it with
-  `cd online && npm install && npm run dev`. It runs offline with no Cloudflare account; nothing is
-  deployed. `online/public/` is the page, with `rules.js` as a symlink to the root file.
+  holds only `wrangler`; nothing else is added without a reason. Run it on the Mac with
+  `cd online && npm install && npm run dev`, offline, with no Cloudflare account.
   `"dev": { "ip": "0.0.0.0" }` in `wrangler.jsonc` puts it on the Mac's Wi-Fi address too, which
-  wrangler prints, so phones on the same network can play.
+  wrangler prints, so phones on the same network can play. `online/public/` is the page, with
+  `rules.js` as a symlink to the root file (a deploy uploads what it points to) and `qrcode.js`,
+  Kazuhiko Arase's `qrcode-generator` 2.0.4 vendored as one file, MIT (`qrcode-LICENSE.txt`).
+- **Deployed** on Cloudflare's free plan from Alex's account, at a `workers.dev` address (filled in
+  here by the first deploy, PIO5 05). `cd online && npm run deploy` puts the same code online. Over a
+  free-plan limit requests fail; nothing is ever charged, and no card is on the account. A redeploy
+  drops every socket (pages reconnect by themselves, rooms keep their state); `wrangler delete`
+  destroys every room, with no undo.
+- **Safe to share.** A room nobody has used for 2 hours (no `join`, `seats`, `free`, `start`, `pick`
+  or `new`; pings don't count) expires in any phase: its storage is deleted, every connection gets
+  `room expired`, and its code names no room. `POST /create` is capped by the `Limiter` Durable
+  Object, one per address (`CF-Connecting-IP`): 10 rooms in any hour, then `429`; an hour after its
+  latest room it deletes itself. The same under `npm run dev`.
+- **The online check.** `cd online && node check-online.mjs [URL]` (default `http://localhost:8787`,
+  or the deployed `https://` address) has a made-up code refused, then plays three sockets through a
+  full game with real picks, checking each sees only its own view; about a minute. Against
+  `npm run dev` only: `--cap` (10 rooms, the 11th refused) and, with the server started as
+  `npx wrangler dev --var IDLE:3000`, `--expiry`. Run it after any change to `online/`.
 - **The page's screens.** `/` is the setup screen: one name, Create a room, Join by code, and
   **Pass and play**, a link to `/hotseat`. That is `online/public/hotseat.html`, a symlink to the
   root `index.html` (no timers; its pick screen shows the Last round block). `/?room=CODE` skips
   setup; the host gets the code large, a dropdown per seat, − / + and Start, guests a waiting
   lobby, and only the host gets New game.
-  The name and the seat token live in `sessionStorage` (a refresh rejoins); `localStorage` only
-  prefills the name field. While visible, the page sends `ping` every 5 s.
+  Every lobby screen, the host's and the guests', shows the room link under the code, and as a QR
+  code for a camera. The name and the seat token live in `sessionStorage` (a refresh rejoins);
+  `localStorage` only prefills the name field. While visible, the page sends `ping` every 5 s.
+  The socket is `wss://` when the page is `https:`, else `ws://`.
+- **Wake Lock.** While the page is in a room (lobby or game) it asks to keep the screen on, on any
+  tap (an iPhone grants it only then) and on becoming visible; it lets go at game over and on
+  leaving. Only over `https`: on the Wi-Fi's `http` address it doesn't exist. Refusals are ignored,
+  and nothing is shown.
 - **The page's game screens.** For the pick timer only, a blue bar fixed to the top edge shrinks
   smoothly from the message's `timer.msLeft`, the seconds large under it; nothing during the reveal
   pause, in the lobby or at game over. While a round is open, the pick, picked and welcome-back
@@ -49,15 +71,15 @@ when 2+ humans are seated.
   unchanged in the lobby or `new` at game over. The watching screen says why a bot seat can't be
   taken; a closed room or a refused code gives the setup screen back, the name filled in.
 - **Reconnecting.** The page never asks for a reload. When the socket closes, or a ping gets no
-  `pong` in 4 s, the last screen greys with "Reconnecting…" (after 30 s: "Is the Mac's server
-  running?") and the page reconnects: at once when it becomes visible, else 1, 2, 4… s apart up to
+  `pong` in 4 s, the last screen greys with "Reconnecting…" (after 30 s: "Still trying. Check
+  your connection.") and the page reconnects: at once when it becomes visible, else 1, 2, 4… s apart up to
   10 s while visible, forever. It drops its old socket unheard first, then rejoins by token. Never
-  after `room closed` or `no such room`. A tab whose seat a newer connection took forgets its
+  after `room closed`, `room expired` or `no such room`. A tab whose seat a newer connection took forgets its
   token and only watches.
 - **Rooms by code.** `POST /create` with `{ name }` makes a 5-character room code, saves the room
   with 3 open seats and that name on seat 0, and returns `{ code, token }`. The link is
-  `http://localhost:8787/?room=CODE`; the room is `ws://localhost:8787/room/CODE`, and a code no
-  create made (or a closed room's) is refused and closed. Each room saves itself in
+  `/?room=CODE`; the room is `/room/CODE`, and a code no create made (or a closed or expired room's)
+  is refused and closed. Too many creates from one address get `429` (see Safe to share). Each room saves itself in
   `online/.wrangler/state`, pending timers included, which survives restarts: delete that folder to
   reset every room. Every message carries `host` and `timer` (`{ kind, msLeft }` or null), and
   `standIns` once a game exists.
@@ -66,7 +88,7 @@ when 2+ humans are seated.
   connection there becomes a spectator, told why), else the lowest open seat no token holds, else
   watching. A token holds its seat in the lobby too, until the host makes it a bot, removes it or
   frees it. The lobby's `waiting` names every held seat, and marks it `away` when its holder isn't
-  connected (the lobby's alarm looks every 5 s, so a locked phone shows too): everyone sees "Cat · away", the host gets Free seat, a spectator is told the seat is
+  connected (the lobby's alarm looks every 15 s, so a locked phone shows too): everyone sees "Cat · away", the host gets Free seat, a spectator is told the seat is
   kept for Cat, and Start refuses with "Cat is away". In the lobby, a spectator who sent `join` gets
   the next seat to open (earliest join first), with no reload.
 - **The host** is a seat, `room.host` (seat 0 at create). Only the host sends `seats` (3–5 entries,
@@ -95,7 +117,8 @@ Not here. Design and rules are in the Obsidian vault at `~/code/vault`:
   `Projects/Pirate Islands Online Rules Module/PIO Map.md` (the rules in `rules.js`),
   `Projects/Pirate Islands Online One Room/PIO2 Map.md` (the room in `online/`),
   `Projects/Pirate Islands Online Lobby/PIO3 Map.md` (rooms by code, the host, phones),
-  `Projects/Pirate Islands Online Timers/PIO4 Map.md` (timers, stand-ins, reconnecting)
+  `Projects/Pirate Islands Online Timers/PIO4 Map.md` (timers, stand-ins, reconnecting),
+  `Projects/Pirate Islands Online Deploy/PIO5 Map.md` (putting it online)
 
 Never invent a rule. If the build needs one the rules don't give, ask Alex and record it in the
 vault rules.

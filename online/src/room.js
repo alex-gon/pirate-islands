@@ -1,5 +1,5 @@
 // Rooms by code: each is a Durable Object that holds one game on rules.js and sends each connection
-// only its own view. Its messages are decided in PIO2 02, PIO3 02 and PIO4 03 (the vault). Words: CONTEXT.md.
+// only its own view. Its messages are decided in PIO2 02, PIO3 02, PIO4 03 and PIO5 03 (the vault). Words: CONTEXT.md.
 import { DurableObject } from "cloudflare:workers";
 import "../../rules.js"; // a classic script: sets globalThis.Rules
 const { Rules } = globalThis;
@@ -8,6 +8,7 @@ const CODE = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no look-alikes: 0/O, 1/I/L
 const TYPES = ["join", "seats", "free", "start", "pick", "new"], HOST = ["seats", "free", "start", "new"];
 const BOT = Rules.BOTS.personalities.map(p => p.name), { minPlayers, maxPlayers, pickTimer, nextTimer } = Rules.RULES;
 const ALIVE = 15000, LATE = 2000; // ms: connected = a ping answered this recently; an alarm this late restarts its phase
+const HOUR = 3600000, IDLE = 2 * HOUR, CAP = 10; // a room unused this long expires; rooms one address may create an hour
 const seed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const newToken = () => crypto.getRandomValues(new Uint8Array(16)).toBase64({ alphabet: "base64url", omitPadding: true });
 
@@ -19,6 +20,8 @@ export class Room extends DurableObject {
     // tokens[seat]: the seat token its person holds, or null. host: a seat. timer: the one pending alarm.
     this.room = ctx.storage.kv.get("room") ?? null;
     if (this.room && !this.room.tokens) this.room = null; // saved before seat tokens: treated as never made
+    if (this.room) this.room.usedAt ??= Date.now(); // saved before expiry: counts from now
+    this.idle = Number(env.IDLE) || IDLE; // `wrangler dev --var IDLE:3000` shortens it, for check-online.mjs --expiry
     // The page pings every 5 s; the answer doesn't wake the room, and its time says the phone is there.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -28,8 +31,8 @@ export class Room extends DurableObject {
   create(name) {
     if (this.room) return null;
     const token = newToken();
-    this.room = { names: [name || "Player 1", null, null], bots: [null, null, null], tokens: [token, null, null], host: 0, game: null, timer: null };
-    this.ctx.storage.kv.put("room", this.room);
+    this.room = { names: [name || "Player 1", null, null], bots: [null, null, null], tokens: [token, null, null], host: 0, game: null, timer: null, usedAt: Date.now() };
+    this.ctx.storage.kv.put("room", this.room); this.wake(); // a room nobody ever joins expires too
     return token;
   }
 
@@ -49,18 +52,21 @@ export class Room extends DurableObject {
   webSocketMessage(ws, data) {
     const error = this.handle(ws, data);
     if (error) return this.send(ws, error); // refused: only the sender hears, and nothing is saved
+    this.room.usedAt = Date.now(); // a real message; pings never reach here
     this.save();
   }
 
   // The others hear that the seat is free. A plain close: 1005 and 1006 can't be sent back.
   webSocketClose(ws) { ws.close(); if (this.room) for (const other of this.open()) this.send(other); }
 
-  // The pick timer or the reveal pause ran out. It acts only on the timer it saved, and never throws:
-  // a throwing alarm is retried, which could resolve a round twice (PIO4 02).
+  // The room expired, or the pick timer or the reveal pause ran out. It acts only on the timer it saved,
+  // and never throws: a throwing alarm is retried, which could resolve a round twice (PIO4 02).
   async alarm() {
-    const t = this.room?.timer, game = this.room?.game;
-    if (this.room && !game) return this.lobbyAlarm();
-    if (!t || t.round !== game?.round) return;
+    if (!this.room) return;
+    if (Date.now() >= this.room.usedAt + this.idle) return await this.close("room expired");
+    const t = this.room.timer, game = this.room.game;
+    if (!game) return this.lobbyAlarm();
+    if (!t || t.round !== game.round || Date.now() < t.endsAt) return this.wake(); // woken for an expiry a later message put off
     try {
       if (Date.now() > t.endsAt + LATE) this.arm(t.kind); // the server was down: start the phase again, so phones can return
       else if (t.kind === "next") {
@@ -77,14 +83,14 @@ export class Room extends DurableObject {
     } catch (e) { console.error(e); this.room = this.ctx.storage.kv.get("room") ?? null; }
   }
 
-  // The lobby has no timer, so its alarm looks every 5 s while anyone is here: a phone that goes silent
+  // The lobby has no timer, so its alarm looks every 15 s while anyone is here: a phone that goes silent
   // without closing (locked, frozen) shows as away once it stops being connected. Only a change is sent,
   // so the host's open dropdown isn't redrawn.
   lobbyAlarm() {
     const { bots, tokens } = this.room, away = bots.map((bot, q) => !bot && !!tokens[q] && !this.connected(q)).join();
     if (away !== this.away) for (const ws of this.open()) this.send(ws);
     this.away = away;
-    if (this.open().length) this.ctx.storage.setAlarm(Date.now() + 5000);
+    this.wake();
   }
 
   // Applies one message from ws, or returns a short reason to refuse it.
@@ -171,22 +177,32 @@ export class Room extends DurableObject {
     standIns.forEach((s, q) => s && game.picks[q] === null && Rules.pick(game, q, Rules.botPick(game, q, "Sneaky")));
   }
 
-  // Saves the one pending timer, so alarm() can check it; null clears it. The seconds were copied in at Start.
+  // Saves the one pending timer, so alarm() can check it; null clears it. save() sets the alarm. The seconds
+  // were copied in at Start.
   arm(kind) {
     const { game, timers } = this.room;
     this.room.timer = kind && { kind, round: game.round, endsAt: Date.now() + timers[kind] * 1000 };
-    if (kind) this.ctx.storage.setAlarm(this.room.timer.endsAt); else this.ctx.storage.deleteAlarm();
   }
 
-  // Every person has dropped: the game ends with no winner, and the code names no room any more.
-  async close() {
+  // The one alarm: the earlier of the phase's own time (the timer, or the lobby's next look while anyone is
+  // here) and the expiry. At game over, the expiry alone.
+  wake() {
+    const { game, timer, usedAt } = this.room;
+    const phase = game ? timer?.endsAt : this.open().length ? Date.now() + ALIVE : undefined;
+    this.ctx.storage.setAlarm(Math.min(phase ?? Infinity, usedAt + this.idle));
+  }
+
+  // Every person has dropped ("room closed") or nobody used the room for 2 hours ("room expired"): the game
+  // ends with no winner, and the code names no room any more.
+  async close(error = "room closed") {
     this.room = null;
     await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll();
-    for (const ws of this.open()) { ws.send(JSON.stringify({ error: "room closed" })); ws.close(1000, "room closed"); }
+    for (const ws of this.open()) { ws.send(JSON.stringify({ error })); ws.close(1000, error); }
   }
 
   save() {
-    if (!this.room.game) { this.seatSpectators(); this.ctx.storage.setAlarm(Date.now() + 5000); } // see lobbyAlarm()
+    if (!this.room.game) this.seatSpectators();
+    this.wake();
     this.ctx.storage.kv.put("room", this.room);
     for (const ws of this.open()) this.send(ws);
   }
@@ -227,6 +243,20 @@ export class Room extends DurableObject {
   }
 }
 
+// One per address, by CF-Connecting-IP: at most CAP rooms in any hour. An hour after its latest room it
+// forgets the address. Refused, POST /create gets 429 (PIO5 03).
+export class Limiter extends DurableObject {
+  // True, and counted, if this address may make another room now.
+  take() {
+    const now = Date.now(), times = (this.ctx.storage.kv.get("times") ?? []).filter(t => t > now - HOUR);
+    if (times.length >= CAP) return false;
+    this.ctx.storage.kv.put("times", [...times, now]); this.ctx.storage.setAlarm(now + HOUR);
+    return true;
+  }
+
+  async alarm() { await this.ctx.storage.deleteAll(); }
+}
+
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
@@ -234,6 +264,8 @@ export default {
     if (pathname !== "/create" || request.method !== "POST") return new Response("Not found", { status: 404 });
     const { name } = await request.json().catch(() => ({})); // { name }: the host's, trimmed as join's
     if (typeof name !== "string") return Response.json({ error: "name must be text" }, { status: 400 });
+    const address = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    if (!(await env.LIMITER.getByName(address).take())) return Response.json({ error: "too many rooms" }, { status: 429 });
     let code, token; // drawn again while a room already has it
     do code = Array.from(crypto.getRandomValues(new Uint32Array(5)), n => CODE[n % CODE.length]).join("");
     while (!(token = await env.ROOM.getByName(code).create(name.trim().slice(0, 20))));
