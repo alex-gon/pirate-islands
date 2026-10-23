@@ -30,9 +30,9 @@ when 2+ humans are seated.
   wrangler prints, so phones on the same network can play. `online/public/` is the page, with
   `rules.js` as a symlink to the root file (a deploy uploads what it points to) and `qrcode.js`,
   Kazuhiko Arase's `qrcode-generator` 2.0.4 vendored as one file, MIT (`qrcode-LICENSE.txt`).
-- **Deployed** on Cloudflare's free plan from Alex's account, at a `workers.dev` address (filled in
-  here by the first deploy, PIO5 05). `cd online && npm run deploy` puts the same code online. Over a
-  free-plan limit requests fail; nothing is ever charged, and no card is on the account. A redeploy
+- **Deployed** on Cloudflare's free plan from Alex's account, at
+  `https://pirate-islands-online.chillbotgames.workers.dev`. `cd online && npm run deploy` puts the
+  same code online. Over a free-plan limit requests fail; nothing is ever charged, and no card is on the account. A redeploy
   drops every socket (pages reconnect by themselves, rooms keep their state); `wrangler delete`
   destroys every room, with no undo.
 - **Safe to share.** A room nobody has used for 2 hours (no `join`, `seats`, `free`, `start`, `pick`
