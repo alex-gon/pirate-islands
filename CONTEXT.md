@@ -105,6 +105,12 @@ A room before its game starts: people join, and the host sets the seats and pres
 phase of a room, never another name for the room.
 _Avoid_: waiting room, setup
 
+**Room expired**:
+A room nobody has used for 2 hours: no one has joined, changed the seats, started, picked or begun
+a new game. It deletes itself in any phase, its **Room code** names no room any more, and any phone
+still connected is told the room closed for that reason. Keeping a page open is not using it.
+_Avoid_: timed out, idle (a slow seat in a round is **Skipped**, not idle)
+
 **Pass and play**:
 Playing on one shared device passed round the table, each person picking in secret in turn. No
 room, no host: the other way to play besides a room.
@@ -124,6 +130,8 @@ _Avoid_: hotseat (the code's nickname for its page, never a word players read), 
   returns; the **Seat** keeps its **Haul** either way, and is open again in the next **Lobby**.
 - A **Room** closes when every person's **Seat** is **Dropped**: its game ends with no winner, and
   its **Room code** names no room any more.
+- A **Room** also closes when it has **expired**, whatever its phase: a finished game, a lobby left
+  open, or a game where no one picks any more.
 
 ## Example dialogue
 
