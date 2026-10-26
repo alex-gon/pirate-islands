@@ -116,6 +116,12 @@ Playing on one shared device passed round the table, each person picking in secr
 room, no host: the other way to play besides a room.
 _Avoid_: hotseat (the code's nickname for its page, never a word players read), local game
 
+**How to play**:
+The brief text players read to learn the game, opened from the `?` on every screen of the online
+page and of pass and play. It explains the game's rules and adds none; online-only rules show only
+online.
+_Avoid_: rules (that is the game itself, or the code's rules engine), help, tutorial
+
 ## Relationships
 
 - A **Round** gives each **Seat** at most one **Pick**; a **Seat** with none is **Skipped**.
