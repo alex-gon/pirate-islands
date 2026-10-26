@@ -12,6 +12,16 @@ when 2+ humans are seated.
   in it reads a global. `index.html` is the hotseat: screens, turn order, pass screens; it loads
   `rules.js` with a plain `<script src>` and still opens with a double-click. Plain JS, no build, no
   dependencies. Words (seat, pick, skipped, view) are in `CONTEXT.md`.
+- **How to play: `howtoplay.js`**, beside `rules.js` and loaded after it by both pages (a symlink in
+  `online/public/`, as `rules.js` is). It holds the card's words, approved by Alex word for word in
+  the vault (PIO6 04), and draws a round `?` in the top-right corner of every screen that opens them
+  in a `<dialog>`: ✕, Escape, a backdrop tap or Back close it (the tap pushes a history entry). Each
+  page calls `HowToPlay.mount(online, onSetup)`; it opens itself once on a first visit to setup
+  (`localStorage` `seenHowToPlay`), never over a game. The online page shows **Playing online**, the
+  hotseat one **Pass and play** line instead. Online, `HowToPlay.status` repeats the pick seconds in
+  the card's header, and `HowToPlay.revealed` turns it red ("The reveal is in") until it is closed.
+  Never edit its words without Alex. They name numbers (5, 1 new treasure, 1 minute, 5 seconds), so a
+  variant of those in `RULES` changes them too.
 - **Rule numbers live in the `RULES` block** at the top of `rules.js`. A variant is a one-line edit.
 - **Bot tuning lives in the `BOTS` block** beside it. Bots read only public info (island piles, hauls,
   last round's picks), never this round's locks or the bag, and never change the rules.
@@ -118,7 +128,8 @@ Not here. Design and rules are in the Obsidian vault at `~/code/vault`:
   `Projects/Pirate Islands Online One Room/PIO2 Map.md` (the room in `online/`),
   `Projects/Pirate Islands Online Lobby/PIO3 Map.md` (rooms by code, the host, phones),
   `Projects/Pirate Islands Online Timers/PIO4 Map.md` (timers, stand-ins, reconnecting),
-  `Projects/Pirate Islands Online Deploy/PIO5 Map.md` (putting it online)
+  `Projects/Pirate Islands Online Deploy/PIO5 Map.md` (putting it online),
+  `Projects/Pirate Islands Online Rules Page/PIO6 Map.md` (How to play)
 
 Never invent a rule. If the build needs one the rules don't give, ask Alex and record it in the
 vault rules.

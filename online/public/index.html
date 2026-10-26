@@ -63,6 +63,7 @@
   <div id="app"><p class="muted">Finding the room…</p></div>
 </fieldset>
 <script src="rules.js"></script>
+<script src="howtoplay.js"></script>
 <script src="qrcode.js"></script> <!-- qrcode-generator 2.0.4, MIT: qrcode-LICENSE.txt -->
 <script>
 // The online page: one tab, one seat. The game runs only in the room (online/src/room.js); this page
@@ -101,10 +102,12 @@ function connect() {
     const m = JSON.parse(e.data);
     if (rejoining && !m.error) { rejoining = false; if (m.seat === null) return; } // the room's hello, sent before it reads our join
     lost = null;
+    const revealing = V && !roundOpen(); // a reveal or game over on screen before this message
     if (['no such room', 'room closed', 'room expired'].includes(m.error)) gone = m.error, timer = null;
     else ({ seat, waiting, view: V, error, host, timer, standIns = [] } = m);
     if (error === 'your seat is on another tab or phone') displaced = true, error = null, keepToken(null);
     if (m.token) keepToken(m.token);
+    if (!revealing && V && !roundOpen()) HowToPlay.revealed(); // turns an open How to play card's header red
     drawClock(); render(); keepAwake();
   };
   ws.onclose = lose;
@@ -153,9 +156,11 @@ function drawClock() {
   bar.style.transition = `width ${timer.msLeft}ms linear`; bar.style.width = '0';
   tick();
 }
+// An open How to play card covers the bar, so its header repeats the seconds.
 function tick() {
-  if (!picking()) return;
-  $('secs').innerHTML = `<b>${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}</b>`;
+  if (!picking()) return HowToPlay.status('');
+  const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  $('secs').innerHTML = `<b>${secs}</b>`; HowToPlay.status(`⏱ ${secs} s left to pick`);
 }
 setInterval(tick, 250);
 
@@ -295,6 +300,7 @@ function render() {
   $('join').hidden = joined || seat !== null;
   if (seat !== undefined) $('app').innerHTML = screen();
 }
+HowToPlay.mount(true, !code); // opens itself once, on a first visit to setup
 render();
 </script>
 </body>
