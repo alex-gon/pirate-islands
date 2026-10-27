@@ -55,7 +55,25 @@ _Avoid_: passed, forfeited
 
 **Round**:
 Every seat picks, then the round resolves: raid, crash or unvisited per island, the winner check,
-then the refill.
+the **Jettison** step (Jettison only), then the refill.
+
+**Crash rule**:
+What a crash does, chosen per game at setup (pass and play) or by the **Host** in the **Lobby**:
+**Jettison** (v0.3, the default) or **Freeze** (v0.2). Players read it on the How to play card as
+"Crash rule: Jettison".
+_Avoid_: variant, mode (pass and play and online are the modes), ruleset
+
+**Jettison**:
+The v0.3 **Crash rule**, and the step it adds after the winner check: each seat that crashed puts 1
+treasure of its choice from its **Haul** onto any island, in secret, all revealed together. A seat
+with an empty haul owes none. An island that got a jettison draws no refill. Online, a 30-second
+timer; Sneaky jettisons for a seat too slow or **Dropped**.
+_Avoid_: drop (that is a lost connection), discard, dump
+
+**Freeze**:
+The v0.2 **Crash rule**: nobody jettisons, and a crashed island's pile stays as it is, drawing no
+refill. "Frozen" is Freeze's word only.
+_Avoid_: frozen (under Jettison a crashed island just "gets no token")
 
 **Between rounds**:
 The time after a round resolves and before the next starts, while the reveal is on screen. No pick
@@ -76,9 +94,15 @@ _Avoid_: score
 **Bag**:
 The tokens not yet drawn. Hidden, including how many are left.
 
+**Unfinished**:
+A game ended early, at any time and under either **Crash rule**: nobody wins and the tie order is
+not used. The table agrees to stop; online the **Host** ends it and the room returns to the
+**Lobby**; in **Pass and play** it returns to setup.
+_Avoid_: draw (a tie at 5 shares the win), abandoned, cancelled
+
 **View**:
-What one seat may see of a game: everything public plus its own pick, never the bag, another
-seat's pick this round, or older reveals before the end.
+What one seat may see of a game: everything public plus its own pick and jettison, never the bag,
+another seat's pick or jettison this round, or older reveals before the end.
 _Avoid_: client state, snapshot
 
 **Room**:
@@ -127,6 +151,9 @@ _Avoid_: rules (that is the game itself, or the code's rules engine), help, tuto
 - A **Round** gives each **Seat** at most one **Pick**; a **Seat** with none is **Skipped**.
 - Resolving a **Round** adds one **Reveal** and moves treasure from **Piles** to **Hauls**, and
   from the **Bag** to **Piles**.
+- A crash under **Jettison** makes each crasher with treasure owe one **Jettison**; under **Freeze**
+  it makes none. Either way the crashed island draws no refill.
+- An **Unfinished** game has no winner; a new game starts from the **Lobby** or setup.
 - A **View** is always for one **Seat**, or for a **Spectator**.
 - A **Room** holds one game; each **Seat** in it is played by at most one connection.
 - A **Room** has one **Host** and one **Room code**, and is a **Lobby** until the **Host** starts

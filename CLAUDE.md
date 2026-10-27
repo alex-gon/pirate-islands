@@ -27,10 +27,20 @@ when 2+ humans are seated.
   last round's picks), never this round's locks or the bag, and never change the rules.
 - **Keep it tiny and readable.** Fewer lines over cleverness. No framework, no tests, no tooling
   unless a playtest proves it's needed.
+- **Crash rule.** `newGame(names, bots, seed, crashRule)` takes `'jettison'` (v0.3, the default)
+  or `'freeze'` (v0.2, played exactly as before) and keeps it in `state.crashRule`. Under Jettison,
+  `resolve` stops after the winner check when a crasher holds treasure: `state.jettisons` (per seat
+  `false` owes none, `null` owes, then `{ colour, island }`) is open, bot seats jettison at once
+  (`botJettison`, a placeholder until PI3 03), `jettison(state, seat, colour, island)` records one
+  and `refill(state)` reveals them all, moves the tokens and refills; `nextRound` refuses until then.
+  `endEarly(state)` makes any game **unfinished** (`winners: []`). Both pages still pass `'freeze'`
+  until they have a jettison step.
 - **One exception: the bot check.** `node check.js` (no dependencies, about 20 s) plays 1,000
-  bot-only games on `rules.js` and fails if a game throws, runs past 100 rounds, or `viewFor` shows
-  a seat the bag, another seat's pick this round, or the history before the end. Some games skip
-  seats; the last 100 use a small bag so it runs out. Run it after any change to `rules.js`.
+  bot-only games on `rules.js`, half on each crash rule, jettisons included, and fails if a game
+  throws, a Freeze game runs past 100 rounds, a token is lost or made up, or `viewFor` shows a seat
+  the bag, another seat's pick or jettison this round, or the history before the end. Jettison games
+  past 100 rounds are reported, not failed. Some games skip seats, some end early; the last 100 use
+  a small bag so it runs out. Run it after any change to `rules.js`.
 - **`online/`: the one folder with dependencies.** Rooms for playing on phones and in browser tabs:
   a Cloudflare Worker with one Durable Object per room, `online/src/room.js`, that holds the
   real game on `rules.js` and sends each connection only `viewFor` its own seat. `online/package.json`

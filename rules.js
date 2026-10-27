@@ -13,7 +13,7 @@ const RULES = {
   ],
   perColour: 15, // tokens of each colour in the bag; drawn blind, never returned
   startPile: 2,  // tokens drawn onto every island at setup
-  refill: 1,     // tokens drawn onto every island that didn't crash; a bag too short to refill them all ends the game
+  refill: 1,     // tokens drawn onto every island that didn't crash or get a jettison; a bag too short to refill them all ends the game
   winAt: 5,      // of one colour, checked after each round. Ties: most of own best colour → most colours → most pieces → share
   minPlayers: 3, maxPlayers: 5,
   pickTimer: 60, nextTimer: 5, // online only, in seconds: to pick, then the reveal pause. A room copies them at Start
@@ -44,11 +44,13 @@ function rand(state) {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-// bots[i]: a personality name, or null for a person. A blank name becomes 'Player N'.
-function newGame(names, bots, seed) {
+// bots[i]: a personality name, or null for a person. A blank name becomes 'Player N'. crashRule: 'jettison' (v0.3,
+// each crasher puts 1 treasure from their haul onto any island) or 'freeze' (v0.2, a crashed island just gets no token).
+function newGame(names, bots, seed, crashRule = 'jettison') {
   const state = { players: names.map((name, i) => ({ name: name.trim() ? name : `Player ${i + 1}`, haul: zeros(), bot: bots[i] ?? null })),
-                  islands: [], bag: RULES.treasure.map(() => RULES.perColour), rng: seed | 0, round: 1, picks: null,
-                  history: [], winners: null, bagOut: false, maxIsland: RULES.startPile };
+                  islands: [], bag: RULES.treasure.map(() => RULES.perColour), rng: seed | 0, round: 1, picks: null, jettisons: null,
+                  crashRule: crashRule === 'freeze' ? 'freeze' : 'jettison', history: [], winners: null, bagOut: false,
+                  unfinished: false, maxIsland: RULES.startPile };
   state.islands = names.map(() => draw(state, zeros(), RULES.startPile));
   startRound(state);
   return state;
@@ -79,6 +81,25 @@ function pick(state, seat, island) {
 }
 
 const allPicked = state => !!state.picks?.every(p => p !== null);
+
+// Records a jettison: 1 token of a colour in the seat's haul, onto any island. Refuses outside the jettison step, a seat
+// that owes none or has already jettisoned (final, like a pick), and a colour it doesn't hold or an island that doesn't exist.
+// The token stays in the haul until every jettison is revealed together, in refill.
+function jettison(state, seat, colour, island) {
+  if (state.jettisons?.[seat] !== null || !(state.players[seat].haul[colour] > 0)
+    || !Number.isInteger(island) || island < 0 || island >= state.islands.length) return false;
+  state.jettisons[seat] = { colour, island };
+  return true;
+}
+
+// jettisons[q]: false if seat q owes none, null until it jettisons, then { colour, island }.
+const allJettisoned = state => !!state.jettisons?.every(j => j !== null);
+
+// Placeholder until PI3 03 decides how bots jettison: the colour it holds fewest of, onto a random island.
+function botJettison(state, me) {
+  const haul = state.players[me].haul, held = haul.filter(Boolean);
+  return { colour: haul.indexOf(Math.min(...held)), island: Math.floor(rand(state) * state.islands.length) };
+}
 
 // "Guess the crowd": predict where each rival goes from their haul, score each island by (chance I'm there alone) x
 // what its pile is worth to my haul ^greed, add the value of blocking a rival's winning island, then pick at weighted random.
@@ -112,44 +133,79 @@ function leaders(state, seats) {
   return seats.filter(q => key(q) === best);
 }
 
-// Resolve the round: raid, crash or unvisited per island, then check for a winner, then refill. A seat with no
-// pick is skipped: it goes to no island. Afterwards it's between rounds (picks is null) until nextRound.
+// Resolve the round: raid, crash or unvisited per island, then check for a winner. A seat with no pick is skipped: it
+// goes to no island. Afterwards it's between rounds (picks is null). With Jettison, if a crasher has treasure, the round
+// waits in the jettison step (bot seats jettison at once) until refill; otherwise it refills now.
 function resolve(state) {
-  const { players, islands, bag, picks } = state;
+  const { players, islands, picks } = state;
   if (!picks) return false;
   const results = islands.map((pile, i) => {
     const who = picks.flatMap((isl, q) => (isl === i ? [q] : []));
     if (who.length === 1) { pile.forEach((n, c) => players[who[0]].haul[c] += n); islands[i] = zeros(); }
     return { kind: who.length === 1 ? 'raid' : who.length ? 'crash' : 'empty', who, before: [...pile] };
   });
-  const due = islands.filter((_, i) => results[i].kind !== 'crash'); // a crashed island is frozen
   const seats = players.map((_, q) => q), set = seats.filter(q => Math.max(...players[q].haul) >= RULES.winAt);
   if (set.length) state.winners = leaders(state, set);
-  else if (total(bag) < due.length * RULES.refill) { state.winners = leaders(state, seats); state.bagOut = true; }
-  else due.forEach(pile => draw(state, pile, RULES.refill));
   results.forEach((r, i) => (r.after = [...islands[i]]));
-  state.maxIsland = Math.max(state.maxIsland, ...islands.map(total));
-  state.history.push({ round: state.round, picks: [...picks], results }); // the full record; players see it only once the game is over
+  state.history.push({ round: state.round, picks: [...picks], results, jettisons: null }); // the full record; players see it only once the game is over
   state.picks = null;
+  const owe = seats.map(q => results.some(r => r.kind === 'crash' && r.who.includes(q)) && total(players[q].haul) > 0 && null);
+  if (!state.winners && state.crashRule === 'jettison' && owe.includes(null)) {
+    state.jettisons = owe;
+    players.forEach((p, q) => { if (p.bot && owe[q] === null) state.jettisons[q] = botJettison(state, q); });
+  } else finish(state);
   return true;
 }
 
+// Ends the jettison step once every crasher who owes one has jettisoned; the caller jettisons for a slow seat first.
+function refill(state) {
+  if (!allJettisoned(state)) return false;
+  finish(state);
+  return true;
+}
+
+// Reveal every jettison together, moving each token from its haul onto its island, then refill every island that didn't
+// crash or get a jettison. The bag-out check counts only those: 0 due draws nothing and play goes on. A won round draws nothing.
+function finish(state) {
+  const { players, islands, bag, jettisons } = state, h = state.history.at(-1);
+  jettisons?.forEach((j, q) => { if (j) { players[q].haul[j.colour]--; islands[j.island][j.colour]++; } });
+  const due = islands.filter((_, i) => h.results[i].kind !== 'crash' && !jettisons?.some(j => j && j.island === i));
+  if (!state.winners) {
+    if (total(bag) < due.length * RULES.refill) { state.winners = leaders(state, players.map((_, q) => q)); state.bagOut = true; }
+    else due.forEach(pile => draw(state, pile, RULES.refill));
+  }
+  h.results.forEach((r, i) => (r.after = [...islands[i]]));
+  if (jettisons) h.jettisons = jettisons.map(j => j || null);
+  state.maxIsland = Math.max(state.maxIsland, ...islands.map(total));
+  state.jettisons = null;
+}
+
 function nextRound(state) {
-  if (state.picks || state.winners) return false;
+  if (state.picks || state.jettisons || state.winners) return false;
   state.round++;
   startRound(state);
   return true;
 }
 
-// What one seat may see, as a copy: never the bag or its count, another seat's pick this round, or older
-// reveals before the game is over. seat = null for a spectator.
+// Ends the game early, in any phase and under either crash rule: unfinished, nobody wins, and the round in play is dropped.
+function endEarly(state) {
+  if (state.winners) return false;
+  Object.assign(state, { winners: [], unfinished: true, picks: null, jettisons: null });
+  return true;
+}
+
+// What one seat may see, as a copy: never the bag or its count, another seat's pick or jettison this round, or older
+// reveals before the game is over. seat = null for a spectator. jettisoning: the seat still owes a jettison.
 function viewFor(state, seat) {
   const s = structuredClone(state), over = s.winners !== null;
-  return { round: s.round, islands: s.islands, over,
-           players: s.players.map((p, q) => ({ name: p.name, haul: p.haul, bot: p.bot, picked: s.picks?.[q] != null })),
-           myPick: s.picks?.[seat] ?? null, last: s.history.at(-1) ?? null, winners: s.winners, bagOut: s.bagOut,
+  return { round: s.round, islands: s.islands, over, crashRule: s.crashRule,
+           players: s.players.map((p, q) => ({ name: p.name, haul: p.haul, bot: p.bot, picked: s.picks?.[q] != null,
+                                               jettisoning: s.jettisons?.[q] === null })),
+           myPick: s.picks?.[seat] ?? null, myJettison: s.jettisons?.[seat] || null, last: s.history.at(-1) ?? null,
+           winners: s.winners, bagOut: s.bagOut, unfinished: s.unfinished,
            ...(over && { history: s.history, maxIsland: s.maxIsland }) };
 }
 
-globalThis.Rules = { RULES, BOTS, newGame, pick, allPicked, resolve, nextRound, botPick, viewFor };
+globalThis.Rules = { RULES, BOTS, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly,
+                     botPick, botJettison, viewFor };
 })();

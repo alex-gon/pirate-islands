@@ -149,7 +149,8 @@ export class Room extends DurableObject {
       if (game) return "the game has started";
       const empty = bots.findIndex((bot, q) => !bot && !this.connected(q)); // neither a bot nor a connected person
       if (empty >= 0) return tokens[empty] ? `${names[empty]} is away` : `Seat ${empty + 1} is empty`;
-      Object.assign(this.room, { game: Rules.newGame(names, bots, seed()), timers: { pick: pickTimer, next: nextTimer }, standIns: bots.map(() => false) });
+      // Freeze until the room has a jettison step.
+      Object.assign(this.room, { game: Rules.newGame(names, bots, seed(), "freeze"), timers: { pick: pickTimer, next: nextTimer }, standIns: bots.map(() => false) });
       this.arm("pick");
       return;
     }

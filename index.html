@@ -48,7 +48,7 @@ const act = {
   count(n) { setup.count = n; render(); },
   name(i, v) { setup.names[i] = v; },
   bot(i) { setup.bots[i] = setup.bots[i] === null ? BOTS.personalities[setup.rot++ % BOTS.personalities.length].name : null; render(); },
-  start() { S = Rules.newGame(setup.names.slice(0, setup.count).map(n => n.trim()), setup.bots, Date.now()); advance(); render(); },
+  start() { S = Rules.newGame(setup.names.slice(0, setup.count).map(n => n.trim()), setup.bots, Date.now(), 'freeze'); advance(); render(); }, // Freeze until the page has a jettison step
   show() { phase = 'pick'; sel = null; render(); },
   choose(i) { sel = i; render(); },
   lock() { Rules.pick(S, turn, sel); advance(); render(); },
