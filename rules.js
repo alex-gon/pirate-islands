@@ -95,10 +95,19 @@ function jettison(state, seat, colour, island) {
 // jettisons[q]: false if seat q owes none, null until it jettisons, then { colour, island }.
 const allJettisoned = state => !!state.jettisons?.every(j => j !== null);
 
-// Placeholder until PI3 03 decides how bots jettison: the colour it holds fewest of, onto a random island.
+// "Spite", every bot and the stand-in alike: the token and island that cost least, adding what the token is worth to my
+// haul to the most any rival's worth for that island grows (winPull counts, so it won't hand a rival the win). A random
+// fraction breaks ties.
 function botJettison(state, me) {
-  const haul = state.players[me].haul, held = haul.filter(Boolean);
-  return { colour: haul.indexOf(Math.min(...held)), island: Math.floor(rand(state) * state.islands.length) };
+  const { players, islands } = state, haul = players[me].haul;
+  const worth = (h, pile) => pile.reduce((a, n, c) => a + n * (1 + BOTS.sets * h[c]), 0) * (pile.some((n, c) => h[c] + n >= RULES.winAt) ? BOTS.winPull : 1);
+  let best = null;
+  haul.forEach((n, colour) => n && islands.forEach((pile, island) => {
+    const after = pile.map((m, c) => m + (c === colour)), gain = players.map((p, q) => (q === me ? 0 : worth(p.haul, after) - worth(p.haul, pile)));
+    const cost = 1 + BOTS.sets * (n - 1) + Math.max(...gain) + rand(state) / 100;
+    if (!best || cost < best.cost) best = { cost, colour, island };
+  }));
+  return { colour: best.colour, island: best.island };
 }
 
 // "Guess the crowd": predict where each rival goes from their haul, score each island by (chance I'm there alone) x

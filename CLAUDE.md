@@ -31,7 +31,7 @@ when 2+ humans are seated.
   or `'freeze'` (v0.2, played exactly as before) and keeps it in `state.crashRule`. Under Jettison,
   `resolve` stops after the winner check when a crasher holds treasure: `state.jettisons` (per seat
   `false` owes none, `null` owes, then `{ colour, island }`) is open, bot seats jettison at once
-  (`botJettison`, a placeholder until PI3 03), `jettison(state, seat, colour, island)` records one
+  (`botJettison`, "Spite": the token and island that cost it least plus help any rival least, PI3 03), `jettison(state, seat, colour, island)` records one
   and `refill(state)` reveals them all, moves the tokens and refills; `nextRound` refuses until then.
   `endEarly(state)` makes any game **unfinished** (`winners: []`). Both pages still pass `'freeze'`
   until they have a jettison step.
