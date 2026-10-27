@@ -64,6 +64,7 @@
 </fieldset>
 <script src="rules.js"></script>
 <script src="howtoplay.js"></script>
+<script src="jettison-prototype.js"></script> <!-- PROTOTYPE (PI3 05) -->
 <script src="qrcode.js"></script> <!-- qrcode-generator 2.0.4, MIT: qrcode-LICENSE.txt -->
 <script>
 // The online page: one tab, one seat. The game runs only in the room (online/src/room.js); this page
@@ -74,7 +75,7 @@ const LETTERS = 'ABCDE';
 const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // everything in a message comes from the room or other tabs
 const $ = id => document.getElementById(id);
 
-let seat, waiting, V, error, host, timer, standIns = []; // the room's last message, drawn as it is: the page keeps no game of its own
+let seat, waiting, V, error, host, timer, standIns = [], crashRule = 'jettison', note = null; // the room's last message, drawn as it is: the page keeps no game of its own
 let sel = null, joined = false; // the island selected but not locked in; whether this tab sent join
 // lost: when the connection dropped, null while connected. gone: 'no such room', 'room closed' or 'room expired', never retried.
 // displaced: a newer connection took this tab's seat, so it forgot its token and only watches.
@@ -104,7 +105,7 @@ function connect() {
     lost = null;
     const revealing = V && !roundOpen(); // a reveal or game over on screen before this message
     if (['no such room', 'room closed', 'room expired'].includes(m.error)) gone = m.error, timer = null;
-    else ({ seat, waiting, view: V, error, host, timer, standIns = [] } = m);
+    else ({ seat, waiting, view: V, error, host, timer, standIns = [], crashRule = 'jettison', note = null } = m);
     if (error === 'your seat is on another tab or phone') displaced = true, error = null, keepToken(null);
     if (m.token) keepToken(m.token);
     if (!revealing && V && !roundOpen()) HowToPlay.revealed(); // turns an open How to play card's header red
@@ -145,11 +146,11 @@ function keepAwake() {
 // The bar shrinks smoothly from the msLeft in the room's last message; the seconds count down from it.
 // Only the pick timer is shown: the 5 s reveal pause has nothing on screen (PIO4 10).
 let deadline;
-const picking = () => timer?.kind === 'pick';
+const picking = () => timer?.kind === 'pick' || timer?.kind === 'jettison'; // PROTOTYPE: the jettison timer on the same bar
 function drawClock() {
   $('clock').hidden = !picking(); document.body.classList.toggle('timed', picking());
   if (!picking()) return;
-  const bar = $('bar'), full = RULES.pickTimer * 1000;
+  const bar = $('bar'), full = (timer.kind === 'jettison' ? JP.JETTISON_TIMER : RULES.pickTimer) * 1000;
   deadline = Date.now() + timer.msLeft;
   bar.style.transition = 'none'; bar.style.width = `${Math.min(100, (100 * timer.msLeft) / full)}%`;
   bar.offsetWidth; // the shrink starts from this width
@@ -160,7 +161,7 @@ function drawClock() {
 function tick() {
   if (!picking()) return HowToPlay.status('');
   const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-  $('secs').innerHTML = `<b>${secs}</b>`; HowToPlay.status(`⏱ ${secs} s left to pick`);
+  $('secs').innerHTML = `<b>${secs}</b>`; HowToPlay.status(`⏱ ${secs} s left to ${timer.kind}`);
 }
 setInterval(tick, 250);
 
@@ -185,6 +186,9 @@ const act = {
   choose(i) { sel = i; render(); },
   lock() { send({ type: 'pick', island: sel }); sel = null; },
   again() { send({ type: 'new' }); },
+  rule(r) { send({ type: 'rule', rule: r }); }, // PROTOTYPE
+  jlock() { send({ type: 'jettison', colour: JP.s.colour, island: JP.s.island }); JP.reset(); },
+  end() { send({ type: 'end' }); },
   takeOver() { send(waiting ? { type: 'seats', bots: waiting.map(s => s.bot) } : { type: 'new' }); }, // refused while the host is connected
 };
 
@@ -219,37 +223,40 @@ const roomCode = () => `<p class="muted" style="text-align: center; margin: 8px 
 const CHOICES = [['', 'Open for a person'], ...BOTS.personalities.map(p => [p.name, `🤖 ${p.name}`])];
 const dropdown = (q, b) => `<select onchange="act.seat(${q}, this.value)">${CHOICES.map(([v, label]) =>
   `<option value="${v}" ${v === (b ?? '') ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
-const hostLobby = () => roomCode() + waiting.map((s, q) => `<div class="seat"><b>Seat ${q + 1}</b> ${q === host ? 'You (host)'
+const ended = () => (note === 'ended' ? '<p class="crash"><b>The last game ended early: unfinished, nobody won.</b></p>' : '');
+const hostLobby = () => ended() + roomCode() + waiting.map((s, q) => `<div class="seat"><b>Seat ${q + 1}</b> ${q === host ? 'You (host)'
   : s.away ? `${esc(s.name)}${away(s)} <button class="small" onclick="act.free(${q})">Free seat</button>`
   : s.name !== null && !s.bot ? esc(s.name) : dropdown(q, s.bot) + (s.bot ? '' : ' <span class="muted">waiting…</span>')}</div>`).join('')
   + `<div class="row" style="justify-content: center; margin-top: 8px">
     <button onclick="act.resize(-1)" ${waiting.length <= RULES.minPlayers ? 'disabled' : ''}>−</button> ${waiting.length} seats
     <button onclick="act.resize(1)" ${waiting.length >= RULES.maxPlayers ? 'disabled' : ''}>+</button></div>
+  ${JP.ruleSwitch(crashRule, true)}
   <button class="big" onclick="act.start()">Start</button>`;
 
 // ticks: a ✓ beside each seat that has picked this round.
 function board(ticks) {
-  return `<div class="row">${V.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
+  return `${JP.topTag(V.crashRule)}<div class="row">${V.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
     <div class="row">${V.players.map((p, q) => `<div class="card ${q === seat ? 'you' : ''} ${standIns[q] ? 'left' : ''}">${name(q)}${you(q)}${bot(p.bot)}${ticks && p.picked ? ' ✓' : ''}
       ${standIns[q] ? '<br><span class="muted">left · 🤖 playing</span>' : ''}<br>${tokens(p.haul)}</div>`).join('')}</div>
-    <p class="muted">Round ${V.round} · first to ${RULES.winAt} of one colour wins</p>`;
+    <p class="muted">Round ${V.round} · first to ${RULES.winAt} of one colour wins${JP.roundExtra(V.crashRule)}</p>${seat === host ? JP.endButton('top') : ''}`;
 }
 
 function resultLine(r, i) {
   if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone and took ${tokens(r.before)}! Now: ${tokens(r.after)}</p>`;
-  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. Nobody takes anything and ${L(i)} stays frozen.</p>`;
+  if (r.kind === 'crash') return JP.crashLine(r, i, names(r.who), V.crashRule);
   return `<p class="empty"><b>${L(i)}:</b> Nobody came. Now: ${tokens(r.after)}</p>`;
 }
 
-const reveal = () => `${V.last.picks[seat] === null ? '<p class="crash"><b>Time ran out: you were skipped this round.</b></p>' : ''}<h2>Reveal!</h2>
+const reveal = () => !V.last ? '' : `${V.last.picks[seat] === null ? '<p class="crash"><b>Time ran out: you were skipped this round.</b></p>' : ''}<h2>Reveal!</h2>
   <p>${V.last.picks.map((isl, q) => `<b>${name(q)}</b>${V.last.standIns?.[q] ? ' 🤖' : ''} → ${isl === null ? 'skipped (too slow)' : L(isl)}`).join(' · ')}</p>
   ${V.last.results.map(resultLine).join('')}
+  ${JP.jettisonReveal(V.last, name)}
   ${V.bagOut ? `<p class="crash"><b>The bag can't refill every island: the game ends!</b></p>` : ''}`;
 
 // While a round is open, V.last is the round before: one line per player, as its reveal said (PIO4 10).
 const lastRound = () => V.last ? `<p class="muted">Last round</p>${V.last.picks.map((isl, q) => {
   const r = V.last.results[isl], line = `${name(q)}${you(q)}${V.last.standIns?.[q] ? ' 🤖' : ''} → ${!r ? 'skipped (too slow)'
-    : `${L(isl)}: ${r.kind === 'raid' ? `raided alone, took ${tokens(r.before)}` : `💥 crash with ${names(r.who.filter(w => w !== q))}`}`}`;
+    : `${L(isl)}: ${r.kind === 'raid' ? `raided alone, took ${tokens(r.before)}` : `💥 crash with ${names(r.who.filter(w => w !== q))}${JP.jSuffix(V.last, q)}`}`}`;
   return `<p class="${q === seat && !r ? 'crash' : ''}">${q === seat ? `<b>${line}</b>` : line}</p>`;
 }).join('')}` : '';
 
@@ -259,7 +266,7 @@ const pickView = () => `<h2>Choose an island</h2>
 
 function end() {
   const all = V.history.flatMap(h => h.results);
-  return `<h2>🏆 ${V.winners.map(q => `${name(q)} (${bestColour(V.players[q])})`).join(' & ')} ${V.winners.length > 1 ? 'share the win' : 'wins'}!</h2>
+  return `${V.unfinished ? '<h2>Game ended early</h2><p>Unfinished: nobody wins.</p>' : `<h2>🏆 ${V.winners.map(q => `${name(q)} (${bestColour(V.players[q])})`).join(' & ')} ${V.winners.length > 1 ? 'share the win' : 'wins'}!</h2>`}
   ${V.bagOut ? `<p>The bag ran out, so the most of one colour won.</p>` : ''}
   <p>Rounds: <b>${V.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
      Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${V.maxIsland}</b> tokens</p>
@@ -267,9 +274,18 @@ function end() {
   ${V.history.map(h => `<tr><td>${h.round}</td>${h.picks.map((isl, q) => {
     const r = h.results[isl];
     if (!r) return '<td class="empty">skipped</td>';
-    return `<td class="${esc(r.kind)}">${L(isl)}${h.standIns?.[q] ? ' 🤖' : ''}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
+    return `<td class="${esc(r.kind)}">${L(isl)}${h.standIns?.[q] ? ' 🤖' : ''}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ` 💥${JP.jCell(h, q)}` : ''}</td>`;
   }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table></div>
-  ${seat === host ? '<button class="big" onclick="act.again()">New game</button>' : `<p class="muted">Waiting for ${hostName()} to start a new game</p>${takeOver()}`}`;
+  ${seat === host ? `<button class="big" onclick="act.again()">${V.unfinished ? 'Back to the lobby' : 'New game'}</button>` : `<p class="muted">Waiting for ${hostName()} to start a new game</p>${takeOver()}`}`;
+}
+
+// PROTOTYPE: the jettison step. Crashers are the seats on a crashed island in V.last; jettisoning = still owes one.
+function jettisonStep() {
+  const h = V.last, crashers = h.picks.flatMap((isl, q) => (isl !== null && h.results[isl].kind === 'crash' && (V.players[q].jettisoning || V.players[q].haul.some(Boolean)) ? [q] : []));
+  const endB = seat === host ? JP.endButton('bottom') : '';
+  if (seat !== null && V.players[seat].jettisoning)
+    return board() + reveal() + JP.jettisonView({ who: '', haul: V.players[seat].haul, islands: V.islands, crashedOn: h.picks[seat], lock: 'act.jlock()' }) + endB;
+  return board() + reveal() + JP.waitingView({ list: crashers.map(q => ({ name: name(q) + you(q), done: !V.players[q].jettisoning })), mine: V.myJettison }) + endB;
 }
 
 // The screen follows from the message (PIO2 03's table and PIO3 03's lobbies in the vault).
@@ -279,12 +295,14 @@ function screen() {
   if (seat === null) return `<h2>Watching</h2><p class="muted">${displaced ? 'Your seat is now on another tab or phone. This one is watching.'
     : waiting ? (kept() || 'Every seat is taken. ') + "You'll get a seat if one opens." : 'Every seat is taken.'}
     ${standIns.some(Boolean) ? 'A seat a bot is playing can only go back to the phone that left it.' : ''}</p>${waiting ? seatList() : board() + (V.last ? reveal() : '')}`;
-  if (waiting) return seat === host ? hostLobby() : roomCode() + `<p>Waiting for ${hostName()} to start</p>${takeOver()}${seatList()}`;
-  if (!roundOpen()) return board() + reveal();
+  if (waiting) return seat === host ? hostLobby() : ended() + roomCode() + `<p>Waiting for ${hostName()} to start</p>${takeOver()}${seatList()}${JP.ruleSwitch(crashRule, false)}`;
+  if (!roundOpen() && (V.players.some(p => p.jettisoning) || timer?.kind === 'jettison')) return jettisonStep(); // PROTOTYPE
+  if (!roundOpen()) return board() + reveal() + (seat === host ? JP.endButton('bottom') : '');
   if (standIns[seat]) return board(true) + lastRound() + `<h2>Welcome back!</h2><p>A bot is playing your seat this round. You play again from the next round.</p>
     ${V.myPick === null ? '' : `<p>The bot picked ${L(V.myPick)} for you.</p>`}`; // returned mid-round: the stand-in has already picked
-  if (V.myPick === null) return board() + lastRound() + pickView();
-  return board(true) + lastRound() + `<h2>You picked ${L(V.myPick)}</h2><p class="muted">✓ = picked. Waiting for the others…</p>`;
+  const endB = seat === host ? JP.endButton('bottom') : '';
+  if (V.myPick === null) return board() + lastRound() + pickView() + endB;
+  return board(true) + lastRound() + `<h2>You picked ${L(V.myPick)}</h2><p class="muted">✓ = picked. Waiting for the others…</p>` + endB;
 }
 
 function render() {
@@ -301,6 +319,7 @@ function render() {
   if (seat !== undefined) $('app').innerHTML = screen();
 }
 HowToPlay.mount(true, !code); // opens itself once, on a first visit to setup
+JP.redraw = render; JP.onEnd = act.end; JP.bar(); // PROTOTYPE
 render();
 </script>
 </body>
