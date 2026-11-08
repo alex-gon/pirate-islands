@@ -11,9 +11,12 @@
   .card { flex: 1; min-width: 70px; background: #fff; border: 2px solid #c9b78f; border-radius: 10px; padding: 8px; text-align: center; }
   .card b { display: block; font-size: 26px; }
   .t { display: inline-block; min-width: 1.4em; margin: 2px; padding: 0 4px; border: 1px solid #0005; border-radius: 9px; font-weight: bold; font-size: 15px; }
+  .t.ghost { outline: 2px dashed #1d5c7a; outline-offset: 1px; opacity: 0.75; } /* the token you're about to jettison, on its island */
+  .jtok { font-size: 15px; } .jtok .t { font-size: 22px; padding: 2px 8px; }
   button { font: inherit; padding: 10px 16px; border: 0; border-radius: 8px; background: #1d5c7a; color: #fff; cursor: pointer; margin: 4px 0; }
   button.big { width: 100%; font-size: 20px; padding: 16px; }
   button.card { color: #222; } button.sel { border-color: #1d5c7a; background: #d7ecf5; }
+  button.small { font-size: 15px; padding: 6px 10px; background: none; color: #1d5c7a; border: 1px solid #1d5c7a; }
   .cover { background: #1d3b4a; color: #fff; border-radius: 12px; padding: 32px 16px; text-align: center; }
   .raid { color: #1a7f37; } .crash { color: #b42318; } .empty { color: #777; }
   .muted { color: #666; font-size: 15px; }
@@ -31,16 +34,25 @@ const { RULES, BOTS } = Rules;
 const LETTERS = 'ABCDE';
 const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // names are typed by players, so escape before HTML
 const zeros = () => RULES.treasure.map(() => 0);
+const RULE = { jettison: 'Jettison', freeze: 'Freeze' }; // the crash rule's name; the setup buttons add its version
 
 let S = null; // the game in play, a Rules state; null = setup screen
-let phase, turn, sel; // the screen showing, whose turn it is, the island they've chosen but not locked in
-let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'], bots: [null, null, null, null, null], rot: 0 };
+let phase, turn, sel, jsel; // the screen showing, whose turn it is, the island (or jettison) chosen but not locked in
+let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'], bots: [null, null, null, null, null], rot: 0, rule: 'jettison' };
+const humans = () => S.players.filter(p => !p.bot).length;
 
 // The bots have already picked; show the next human seat, or resolve once every seat has picked. Pass screens only with 2+ humans.
 function advance() {
   if (Rules.allPicked(S)) { Rules.resolve(S); phase = 'reveal'; }
-  else { turn = S.picks.indexOf(null); phase = S.players.filter(p => !p.bot).length > 1 ? 'pass' : 'pick'; }
+  else { turn = S.picks.indexOf(null); phase = humans() > 1 ? 'pass' : 'pick'; }
   sel = null;
+}
+
+// The jettison step: the bots have already jettisoned; each human crasher in turn, then all are revealed together.
+function jadvance() {
+  turn = S.jettisons.indexOf(null); jsel = { colour: null, island: null };
+  if (turn < 0) { Rules.refill(S); phase = 'jreveal'; }
+  else phase = humans() > 1 ? 'jpass' : 'jettison';
 }
 
 // ---- Actions (called from buttons) ----
@@ -48,15 +60,22 @@ const act = {
   count(n) { setup.count = n; render(); },
   name(i, v) { setup.names[i] = v; },
   bot(i) { setup.bots[i] = setup.bots[i] === null ? BOTS.personalities[setup.rot++ % BOTS.personalities.length].name : null; render(); },
-  start() { S = Rules.newGame(setup.names.slice(0, setup.count).map(n => n.trim()), setup.bots, Date.now(), 'freeze'); advance(); render(); }, // Freeze until the page has a jettison step
+  rule(r) { setup.rule = r; render(); },
+  start() { S = Rules.newGame(setup.names.slice(0, setup.count).map(n => n.trim()), setup.bots, Date.now(), setup.rule); advance(); render(); },
   show() { phase = 'pick'; sel = null; render(); },
   choose(i) { sel = i; render(); },
   lock() { Rules.pick(S, turn, sel); advance(); render(); },
+  jettison() { jadvance(); render(); },
+  jshow() { phase = 'jettison'; render(); },
+  jcolour(c) { jsel.colour = c; render(); },
+  jisland(i) { jsel.island = i; render(); },
+  jlock() { Rules.jettison(S, turn, jsel.colour, jsel.island); jadvance(); render(); },
   next() {
     if (S.winners) phase = 'end';
     else { Rules.nextRound(S); advance(); }
     render();
   },
+  end() { if (confirm('End this game now? It ends unfinished: nobody wins.')) { Rules.endEarly(S); phase = 'end'; render(); } },
   again() { S = null; render(); },
 };
 
@@ -64,28 +83,45 @@ const act = {
 const L = i => LETTERS[i];
 const name = q => esc(S.players[q].name); // names are stored as typed and escaped here, where they're drawn
 const names = who => who.map(name).join(' & ');
+const chip = (c, cls = '') => `<span class="t ${cls}" style="background:${RULES.treasure[c].ink}">${RULES.treasure[c].mark}</span>`;
 const tokens = counts => counts.map((n, c) => n ? `<span class="t" style="background:${RULES.treasure[c].ink}">${RULES.treasure[c].mark}${n > 1 ? `×${n}` : ''}</span>` : '').join('') || '<span class="empty">empty</span>';
 const letters = counts => counts.map((n, c) => RULES.treasure[c].mark.repeat(n)).join('') || '–';
 const bestColour = p => { const n = Math.max(...p.haul), t = RULES.treasure[p.haul.indexOf(n)]; return `${n} ${n === 1 ? t.one : t.name}`; };
+const crashers = h => h.picks.flatMap((isl, q) => (isl !== null && h.results[isl].kind === 'crash' ? [q] : []));
+const bagOut = () => S.bagOut ? `<p class="crash"><b>The bag can't refill every island${S.crashRule === 'jettison' ? ' due one' : ''}: the game ends!</b></p>` : '';
 
 function board() {
   return `<div class="row">${S.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
     <div class="row">${S.players.map((p, q) => `<div class="card">${name(q)}${p.bot ? ` <span class="muted">🤖 ${p.bot}</span>` : ''}<br>${tokens(p.haul)}</div>`).join('')}</div>
-    <p class="muted">Round ${S.round} · first to ${RULES.winAt} of one colour wins</p>`;
+    <p class="muted">Round ${S.round} · first to ${RULES.winAt} of one colour wins · Crash rule: ${RULE[S.crashRule]}</p>`;
 }
 
 function resultLine(r, i) {
   if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone and took ${tokens(r.before)}! Now: ${tokens(r.after)}</p>`;
-  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. Nobody takes anything and ${L(i)} stays frozen.</p>`;
+  if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. ${S.crashRule === 'freeze'
+    ? `Nobody takes anything and ${L(i)} stays frozen.` : S.winners && !S.bagOut ? 'Nobody takes anything.' // a won round has no jettison
+    : 'Nobody takes anything, and each of them jettisons 1 treasure.'}</p>`;
   return `<p class="empty"><b>${L(i)}:</b> Nobody came. Now: ${tokens(r.after)}</p>`;
+}
+
+// The jettisons of a round, in one line, and a line for each crasher who had nothing to jettison
+function jettisonLines(h) {
+  const done = crashers(h).filter(q => h.jettisons?.[q]), none = crashers(h).filter(q => !h.jettisons?.[q]);
+  return (done.length ? `<p><b>Jettisons:</b> ${done.map(q => `<b>${name(q)}</b> ${chip(h.jettisons[q].colour)} → ${L(h.jettisons[q].island)}`).join(' · ')}</p>` : '')
+    + none.map(q => `<p class="muted">${name(q)}: empty haul, nothing to jettison</p>`).join('');
 }
 
 // Last round, under the pick screen's Lock in: one line per player, as its reveal said (PIO4 10). No skips here.
 const lastRound = () => S.round === 1 ? '' : `<p class="muted">Last round</p>${S.history.at(-1).picks.map((isl, q) => {
-  const r = S.history.at(-1).results[isl], line = `${name(q)} → ${L(isl)}: ${r.kind === 'raid' ? `raided alone, took ${tokens(r.before)}`
-    : `💥 crash with ${names(r.who.filter(w => w !== q))}`}`;
+  const h = S.history.at(-1), r = h.results[isl], j = h.jettisons?.[q];
+  const line = `${name(q)} → ${L(isl)}: ${r.kind === 'raid' ? `raided alone, took ${tokens(r.before)}`
+    : `💥 crash with ${names(r.who.filter(w => w !== q))}${j ? `, jettisoned ${chip(j.colour)} → ${L(j.island)}` : ''}`}`;
   return `<p>${q === turn ? `<b>${line}</b>` : line}</p>`;
 }).join('')}`;
+
+// What happens next under the reveal: the jettison step if one is owed, else the next round or the winner
+const revealButton = () => S.jettisons ? '<button class="big" onclick="act.jettison()">Jettison</button>'
+  : `<button class="big" onclick="act.next()">${S.winners ? 'See who won' : 'Next round'}</button>`;
 
 const views = {
   pass: () => `<div class="cover"><p>Round ${S.round}: pass the device to</p><h2>${name(turn)}</h2>
@@ -94,31 +130,51 @@ const views = {
     <div class="row">${S.islands.map((pile, i) => `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
     <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>
     ${lastRound()}`,
-  reveal: () => `<h2>Reveal!</h2>
-    <p>${S.history.at(-1).picks.map((isl, q) => `<b>${name(q)}</b> → ${isl === null ? 'no island' : L(isl)}`).join(' · ')}</p>
-    ${S.history.at(-1).results.map(resultLine).join('')}
-    ${S.bagOut ? `<p class="crash"><b>The bag can't refill every island: the game ends!</b></p>` : ''}
+  reveal: () => {
+    const h = S.history.at(-1), noStep = S.crashRule === 'jettison' && !S.jettisons && !h.jettisons && (!S.winners || S.bagOut);
+    return `<h2>Reveal!</h2>
+    <p>${h.picks.map((isl, q) => `<b>${name(q)}</b> → ${isl === null ? 'no island' : L(isl)}`).join(' · ')}</p>
+    ${h.results.map(resultLine).join('')}
+    ${noStep ? jettisonLines(h) : ''}
+    ${bagOut()}
+    ${revealButton()}`;
+  },
+  jpass: () => `<div class="cover"><p>Round ${S.round}: jettison. Pass the device to</p><h2>${name(turn)}</h2>
+    <p>Everyone else, look away!</p><button class="big" onclick="act.jshow()">I'm ${name(turn)}, jettison</button></div>`,
+  jettison: () => {
+    const haul = S.players[turn].haul, ready = jsel.colour !== null && jsel.island !== null;
+    const pile = (p, i) => tokens(p).replace('<span class="empty">empty</span>', '') + (jsel.colour !== null && jsel.island === i ? chip(jsel.colour, 'ghost') : '') || '<span class="empty">empty</span>';
+    return `<h2>${name(turn)}, Jettison 1 treasure</h2>
+    <p class="muted">You crashed on ${L(S.history.at(-1).picks[turn])}. Choose a treasure from your haul, then any island.</p>
+    <div class="row">${haul.flatMap((n, c) => n ? [`<button class="card jtok ${jsel.colour === c ? 'sel' : ''}" onclick="act.jcolour(${c})">${chip(c)}<br>${n} in haul</button>`] : []).join('')}</div>
+    <div class="row">${S.islands.map((p, i) => `<button class="card ${jsel.island === i ? 'sel' : ''}" onclick="act.jisland(${i})"><b>${L(i)}</b>${pile(p, i)}</button>`).join('')}</div>
+    <button class="big" ${ready ? '' : 'disabled'} onclick="act.jlock()">Lock in${ready ? ` ${RULES.treasure[jsel.colour].mark} → Island ${L(jsel.island)}` : ''}</button>`;
+  },
+  jreveal: () => `<h2>Jettisons revealed!</h2>${jettisonLines(S.history.at(-1))}
+    ${bagOut()}
     <button class="big" onclick="act.next()">${S.winners ? 'See who won' : 'Next round'}</button>`,
   end: () => {
     const all = S.history.flatMap(h => h.results);
-    return `<h2>🏆 ${S.winners.map(q => `${name(q)} (${bestColour(S.players[q])})`).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'}!</h2>
+    return `${S.unfinished ? '<h2>Game ended early</h2><p>Unfinished: nobody wins.</p>'
+      : `<h2>🏆 ${S.winners.map(q => `${name(q)} (${bestColour(S.players[q])})`).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'}!</h2>`}
     ${S.bagOut ? `<p>The bag ran out, so the most of one colour won.</p>` : ''}
     <p>Rounds: <b>${S.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
        Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b> tokens</p>
     <table><tr><th>Round</th>${S.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
-    ${S.history.map(h => `<tr><td>${h.round}</td>${h.picks.map(isl => {
-      const r = h.results[isl];
+    ${S.history.map(h => `<tr><td>${h.round}</td>${h.picks.map((isl, q) => {
+      const r = h.results[isl], j = h.jettisons?.[q];
       if (!r) return '<td>–</td>'; // skipped: no island
-      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ' 💥' : ''}</td>`;
+      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ` 💥${j ? ` ${RULES.treasure[j.colour].mark}→${L(j.island)}` : ''}` : ''}</td>`;
     }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table>
     <button class="big" onclick="act.again()">New game</button>`;
   },
 };
 
 function setupView() {
+  const crash = setup.rule === 'freeze' ? `Crash: nobody takes anything and the island freezes. Every other island gets ${RULES.refill} new treasure`
+    : `Crash: nobody takes anything, and each of you jettisons 1 treasure from your haul onto any island. Every island that didn't crash and got no jettison gets ${RULES.refill} new treasure`;
   return `<h1>🏴‍☠️ Pirate Islands</h1><p>Secretly pick an island. Alone? Take its whole pile.
-    Anyone else there? Crash: nobody takes anything and the island freezes. Every other island gets ${RULES.refill} new treasure
-    from the bag. First to ${RULES.winAt} of one colour wins.</p>
+    Anyone else there? ${crash} from the bag. First to ${RULES.winAt} of one colour wins.</p>
     <p>${RULES.treasure.map((t, c) => `${tokens(zeros().map((_, k) => +(k === c)))} ${t.name}`).join(' · ')}</p>
     <h2>Players</h2><div class="row">${[...Array(RULES.maxPlayers - RULES.minPlayers + 1)].map((_, k) => {
       const n = RULES.minPlayers + k;
@@ -126,11 +182,18 @@ function setupView() {
     }).join('')}</div>
     ${setup.names.slice(0, setup.count).map((n, i) => `<div class="row"><input style="flex: 1; width: auto" value="${esc(n)}" oninput="act.name(${i}, this.value)">
       <button onclick="act.bot(${i})">${setup.bots[i] === null ? '🙂 Human' : `🤖 ${setup.bots[i]}`}</button></div>`).join('')}
+    <h2>Crash rule</h2><div class="row">${[['jettison', 'Jettison (v0.3)'], ['freeze', 'Freeze (v0.2)']].map(([r, label]) =>
+      `<button class="card ${setup.rule === r ? 'sel' : ''}" onclick="act.rule('${r}')">${label}</button>`).join('')}</div>
     <button class="big" onclick="act.start()">Set sail</button>`;
 }
 
+// End game, at the bottom of every game screen but the pass screens and game over (PI3 05, variant A)
+const endButton = () => ['pick', 'reveal', 'jettison', 'jreveal'].includes(phase)
+  ? '<p style="text-align: center; margin: 4px 0"><button class="small" onclick="act.end()">End game</button></p>' : '';
+
 function render() {
-  document.getElementById('app').innerHTML = S ? `<h1>🏴‍☠️ Pirate Islands</h1>${board()}${views[phase]()}` : setupView();
+  HowToPlay.rule(S ? S.crashRule : setup.rule); // the card follows the rule in play, or on setup the switch
+  document.getElementById('app').innerHTML = S ? `<h1>🏴‍☠️ Pirate Islands</h1>${board()}${views[phase]()}${endButton()}` : setupView();
 }
 HowToPlay.mount(false, true); // the ? and the How to play card, nothing else
 render();

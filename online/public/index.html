@@ -301,6 +301,7 @@ function render() {
   if (seat !== undefined) $('app').innerHTML = screen();
 }
 HowToPlay.mount(true, !code); // opens itself once, on a first visit to setup
+HowToPlay.rule('freeze'); // the room still plays Freeze until PI3 08 gives the online page the switch
 render();
 </script>
 </body>

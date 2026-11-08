@@ -96,8 +96,9 @@ The tokens not yet drawn. Hidden, including how many are left.
 
 **Unfinished**:
 A game ended early, at any time and under either **Crash rule**: nobody wins and the tie order is
-not used. The table agrees to stop; online the **Host** ends it and the room returns to the
-**Lobby**; in **Pass and play** it returns to setup.
+not used. The table agrees to stop and taps **End game**, which asks first; an unfinished game-over
+screen follows ("Game ended early"), then online the **Host** returns the room to the **Lobby**, and
+**Pass and play** returns to setup.
 _Avoid_: draw (a tie at 5 shares the win), abandoned, cancelled
 
 **View**:

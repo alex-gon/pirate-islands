@@ -20,8 +20,11 @@ when 2+ humans are seated.
   (`localStorage` `seenHowToPlay`), never over a game. The online page shows **Playing online**, the
   hotseat one **Pass and play** line instead. Online, `HowToPlay.status` repeats the pick seconds in
   the card's header, and `HowToPlay.revealed` turns it red ("The reveal is in") until it is closed.
-  Never edit its words without Alex. They name numbers (5, 1 new treasure, 1 minute, 5 seconds), so a
-  variant of those in `RULES` changes them too.
+  Never edit its words without Alex. They name numbers (5, 1 new treasure, 1 minute, 5 seconds,
+  30 seconds), so a variant of those in `RULES` changes them too. There are two cards, Jettison's and
+  Freeze's (PI3 06), each with a "Crash rule" line; the card follows the rule in play through
+  `HowToPlay.rule('jettison' | 'freeze')`, which the hotseat calls on every redraw (on setup the
+  switch, in a game `state.crashRule`). The online page sets `'freeze'` until PI3 08.
 - **Rule numbers live in the `RULES` block** at the top of `rules.js`. A variant is a one-line edit.
 - **Bot tuning lives in the `BOTS` block** beside it. Bots read only public info (island piles, hauls,
   last round's picks), never this round's locks or the bag, and never change the rules.
@@ -33,8 +36,17 @@ when 2+ humans are seated.
   `false` owes none, `null` owes, then `{ colour, island }`) is open, bot seats jettison at once
   (`botJettison`, "Spite": the token and island that cost it least plus help any rival least, PI3 03), `jettison(state, seat, colour, island)` records one
   and `refill(state)` reveals them all, moves the tokens and refills; `nextRound` refuses until then.
-  `endEarly(state)` makes any game **unfinished** (`winners: []`). Both pages still pass `'freeze'`
-  until they have a jettison step.
+  `endEarly(state)` makes any game **unfinished** (`winners: []`). The online page still passes
+  `'freeze'` until it has a jettison step (PI3 08).
+- **The hotseat's crash rule** (PI3 07, the screens of PI3 05's variant A). Setup has a **Crash
+  rule** pair of buttons, Jettison (v0.3) selected by default, passed to `newGame`; the round line
+  ends "· Crash rule: Jettison" (or Freeze). Under Jettison the reveal's button reads **Jettison**
+  when one is owed: each human crasher in turn gets a pass screen (only with 2+ humans, as for picks)
+  and the jettison screen (a colour from their haul, then any island, the token dashed on it, Lock in),
+  bots having jettisoned already; then "Jettisons revealed!" in one line. The Last round block and
+  the game-over table name each jettison. **End game** (small, at the bottom of the pick, reveal,
+  jettison and jettisons-revealed screens) asks with the browser's `confirm`, calls `endEarly` and
+  shows the unfinished game-over screen, whose New game returns to setup.
 - **One exception: the bot check.** `node check.js` (no dependencies, about 20 s) plays 1,000
   bot-only games on `rules.js`, half on each crash rule, jettisons included, and fails if a game
   throws, a Freeze game runs past 100 rounds, a token is lost or made up, or `viewFor` shows a seat
@@ -117,7 +129,8 @@ when 2+ humans are seated.
   seated person may, and becomes the host. **Connected** means a ping answered (the room's
   automatic `pong`) or a join in the last 15 s; an open socket alone isn't enough.
 - **Timers.** `pickTimer` and `nextTimer` in `RULES` (60 and 5 s) are copied into the room at
-  Start and run on its one alarm, guarded by the saved `room.timer`. A round resolves when every
+  Start and run on its one alarm (`jettisonTimer`, 30 s, sits beside them for PI3 08's online
+  jettison step; nothing reads it yet), guarded by the saved `room.timer`. A round resolves when every
   seat has picked or the pick timer runs out; then the reveal pause starts the next round by itself.
   An alarm more than 2 s late (the server was down) restarts its phase instead.
 - **Stand-ins.** At the pick timer, a seat without a pick is skipped if connected, and dropped if
