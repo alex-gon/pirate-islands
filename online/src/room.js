@@ -1,12 +1,13 @@
 // Rooms by code: each is a Durable Object that holds one game on rules.js and sends each connection
-// only its own view. Its messages are decided in PIO2 02, PIO3 02, PIO4 03 and PIO5 03 (the vault). Words: CONTEXT.md.
+// only its own view. Its messages are decided in PIO2 02, PIO3 02, PIO4 03, PIO5 03 and PI3 08 (the vault). Words: CONTEXT.md.
 import { DurableObject } from "cloudflare:workers";
 import "../../rules.js"; // a classic script: sets globalThis.Rules
 const { Rules } = globalThis;
 
 const CODE = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no look-alikes: 0/O, 1/I/L
-const TYPES = ["join", "seats", "free", "start", "pick", "new"], HOST = ["seats", "free", "start", "new"];
-const BOT = Rules.BOTS.personalities.map(p => p.name), { minPlayers, maxPlayers, pickTimer, nextTimer } = Rules.RULES;
+const TYPES = ["join", "seats", "free", "rule", "start", "pick", "jettison", "end", "new"], HOST = ["seats", "free", "rule", "start", "end", "new"];
+const BOT = Rules.BOTS.personalities.map(p => p.name), { minPlayers, maxPlayers, pickTimer, nextTimer, jettisonTimer } = Rules.RULES;
+const CRASH_RULES = ["jettison", "freeze"]; // the host's choice in the lobby, passed to newGame at Start
 const ALIVE = 15000, LATE = 2000; // ms: connected = a ping answered this recently; an alarm this late restarts its phase
 const HOUR = 3600000, IDLE = 2 * HOUR, CAP = 10; // a room unused this long expires; rooms one address may create an hour
 const seed = () => crypto.getRandomValues(new Uint32Array(1))[0];
@@ -18,9 +19,11 @@ export class Room extends DurableObject {
     // null until POST /create. bots[seat]: null for a person, or a personality ('Greedy', 'Sneaky' or
     // 'Wild'). names[seat] is null until a person joins it; a bot seat's '' becomes "Player N" in the game.
     // tokens[seat]: the seat token its person holds, or null. host: a seat. timer: the one pending alarm.
+    // rule: the crash rule the next Start plays, 'jettison' or 'freeze'.
     this.room = ctx.storage.kv.get("room") ?? null;
     if (this.room && !this.room.tokens) this.room = null; // saved before seat tokens: treated as never made
     if (this.room) this.room.usedAt ??= Date.now(); // saved before expiry: counts from now
+    if (this.room) this.room.rule ??= "jettison"; // saved before the crash rule
     this.idle = Number(env.IDLE) || IDLE; // `wrangler dev --var IDLE:3000` shortens it, for check-online.mjs --expiry
     // The page pings every 5 s; the answer doesn't wake the room, and its time says the phone is there.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -31,7 +34,7 @@ export class Room extends DurableObject {
   create(name) {
     if (this.room) return null;
     const token = newToken();
-    this.room = { names: [name || "Player 1", null, null], bots: [null, null, null], tokens: [token, null, null], host: 0, game: null, timer: null, usedAt: Date.now() };
+    this.room = { names: [name || "Player 1", null, null], bots: [null, null, null], tokens: [token, null, null], host: 0, rule: "jettison", game: null, timer: null, usedAt: Date.now() };
     this.ctx.storage.kv.put("room", this.room); this.wake(); // a room nobody ever joins expires too
     return token;
   }
@@ -59,7 +62,7 @@ export class Room extends DurableObject {
   // The others hear that the seat is free. A plain close: 1005 and 1006 can't be sent back.
   webSocketClose(ws) { ws.close(); if (this.room) for (const other of this.open()) this.send(other); }
 
-  // The room expired, or the pick timer or the reveal pause ran out. It acts only on the timer it saved,
+  // The room expired, or the pick timer, the jettison timer or the reveal pause ran out. It acts only on the timer it saved,
   // and never throws: a throwing alarm is retried, which could resolve a round twice (PIO4 02).
   async alarm() {
     if (!this.room) return;
@@ -73,11 +76,14 @@ export class Room extends DurableObject {
         this.room.standIns = this.room.standIns.map((s, q) => s && !this.connected(q)); // a returned person plays again
         Rules.nextRound(game); this.standInsPick(); this.arm("pick");
       } else {
-        // No pick yet: connected is skipped, gone is dropped and gets a stand-in. If every person is gone, the room closes.
+        // No pick (or jettison) yet: connected is skipped (or gets Sneaky's jettison, 🤖), gone is dropped and gets a
+        // stand-in. If every person is gone, the room closes.
         const { standIns } = this.room, people = game.players.flatMap((p, q) => (p.bot ? [] : [q]));
-        for (const q of people) if (game.picks[q] === null && !this.connected(q)) standIns[q] = true;
+        const owes = t.kind === "pick" ? game.picks : game.jettisons;
+        for (const q of people) if (owes[q] === null && !this.connected(q)) standIns[q] = true;
         if (people.every(q => standIns[q] && !this.connected(q))) return await this.close();
-        this.standInsPick(); this.resolve();
+        if (t.kind === "pick") { this.standInsPick(); this.resolve(); }
+        else { game.jettisons.forEach((j, q) => j === null && this.botJettison(q)); this.refill(); }
       }
       this.save();
     } catch (e) { console.error(e); this.room = this.ctx.storage.kv.get("room") ?? null; }
@@ -118,7 +124,13 @@ export class Room extends DurableObject {
       if (!error) this.room.host = seat;
       return error;
     }
-    if (!Number.isInteger(msg.island)) return "island must be a whole number"; // pick
+    if (!Number.isInteger(msg.island)) return "island must be a whole number"; // pick or jettison
+    if (msg.type === "jettison") { // { colour, island }, from a seat that owes one
+      if (!Number.isInteger(msg.colour)) return "colour must be a whole number";
+      if (!game || !Rules.jettison(game, seat, msg.colour, msg.island)) return "can't jettison that now";
+      if (Rules.allJettisoned(game)) this.refill();
+      return;
+    }
     if (!game || !Rules.pick(game, seat, msg.island)) return "can't pick that now";
     if (Rules.allPicked(game)) this.resolve();
   }
@@ -149,9 +161,20 @@ export class Room extends DurableObject {
       if (game) return "the game has started";
       const empty = bots.findIndex((bot, q) => !bot && !this.connected(q)); // neither a bot nor a connected person
       if (empty >= 0) return tokens[empty] ? `${names[empty]} is away` : `Seat ${empty + 1} is empty`;
-      // Freeze until the room has a jettison step.
-      Object.assign(this.room, { game: Rules.newGame(names, bots, seed(), "freeze"), timers: { pick: pickTimer, next: nextTimer }, standIns: bots.map(() => false) });
+      Object.assign(this.room, { game: Rules.newGame(names, bots, seed(), this.room.rule), standIns: bots.map(() => false),
+                                 timers: { pick: pickTimer, next: nextTimer, jettison: jettisonTimer } });
       this.arm("pick");
+      return;
+    }
+    if (msg.type === "rule") { // { rule }: 'jettison' or 'freeze'; lobby only
+      if (game) return "the game has started";
+      if (!CRASH_RULES.includes(msg.rule)) return "the rule must be jettison or freeze";
+      this.room.rule = msg.rule;
+      return;
+    }
+    if (msg.type === "end") { // ends the game early, unfinished, nobody wins; "new" then returns to the lobby
+      if (!game || game.winners) return "no game is in play";
+      Rules.endEarly(game); this.arm(null);
       return;
     }
     if (!game?.winners) return "the game isn't over"; // "new": back to the lobby
@@ -165,12 +188,27 @@ export class Room extends DurableObject {
     this.room.tokens[q] = this.room.names[q] = null;
   }
 
-  // Ends the round, marks which seats a stand-in played (for the reveal and the game-over table), and sets
-  // the reveal pause, or none once the game is over.
+  // Ends the round and marks which seats a stand-in played (for the reveal and the game-over table). If
+  // jettisons are owed, a stand-in seat jettisons at once and the jettison timer runs; else the reveal pause,
+  // or none once the game is over.
   resolve() {
     const { game, standIns } = this.room;
-    Rules.resolve(game); game.history.at(-1).standIns = [...standIns];
-    this.arm(game.winners ? null : "next");
+    Rules.resolve(game); Object.assign(game.history.at(-1), { standIns: [...standIns], botJettisons: standIns.map(() => false) });
+    if (!game.jettisons) return this.arm(game.winners ? null : "next");
+    standIns.forEach((s, q) => s && game.jettisons[q] === null && this.botJettison(q));
+    if (Rules.allJettisoned(game)) this.refill(); else this.arm("jettison");
+  }
+
+  // Sneaky's jettison for a slow crasher or a stand-in, marked 🤖 on the round's history entry.
+  botJettison(q) {
+    const { game } = this.room, { colour, island } = Rules.botJettison(game, q);
+    Rules.jettison(game, q, colour, island); game.history.at(-1).botJettisons[q] = true;
+  }
+
+  // Every jettison is in: reveal them together, refill, and set the reveal pause (none if the bag ran out).
+  refill() {
+    const { game } = this.room;
+    Rules.refill(game); this.arm(game.winners ? null : "next");
   }
 
   standInsPick() {
@@ -221,14 +259,14 @@ export class Room extends DurableObject {
     }
   }
 
-  // { seat, view, standIns } once the game exists, else { seat, waiting }: each seat's name once a token
-  // holds it, and away if its holder isn't connected. Always host and timer ({ kind, msLeft } or null);
-  // token to the seat's own connection only; error for a refusal.
+  // { seat, view, standIns, hostAway } once the game exists, else { seat, waiting }: each seat's name once a
+  // token holds it, and away if its holder isn't connected. Always host, rule (the lobby's crash rule) and
+  // timer ({ kind, msLeft } or null); token to the seat's own connection only; error for a refusal.
   send(ws, error) {
-    const { seat, displaced } = ws.deserializeAttachment(), { names, bots, tokens, host, game, standIns, timer } = this.room;
-    const out = game ? { seat, view: Rules.viewFor(game, seat), standIns }
+    const { seat, displaced } = ws.deserializeAttachment(), { names, bots, tokens, host, rule, game, standIns, timer } = this.room;
+    const out = game ? { seat, view: Rules.viewFor(game, seat), standIns, hostAway: !this.connected(host) }
       : { seat, waiting: bots.map((bot, q) => ({ name: bot || tokens[q] ? names[q] : null, bot, away: !bot && !!tokens[q] && !this.connected(q) })) };
-    Object.assign(out, { host, timer: timer && { kind: timer.kind, msLeft: Math.max(0, timer.endsAt - Date.now()) } });
+    Object.assign(out, { host, rule, timer: timer && { kind: timer.kind, msLeft: Math.max(0, timer.endsAt - Date.now()) } });
     if (seat !== null) out.token = tokens[seat];
     error ??= displaced && "your seat is on another tab or phone";
     ws.send(JSON.stringify(error ? { ...out, error } : out));
