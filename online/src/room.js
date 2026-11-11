@@ -24,6 +24,7 @@ export class Room extends DurableObject {
     if (this.room && !this.room.tokens) this.room = null; // saved before seat tokens: treated as never made
     if (this.room) this.room.usedAt ??= Date.now(); // saved before expiry: counts from now
     if (this.room) this.room.rule ??= "jettison"; // saved before the crash rule
+    if (this.room?.game) this.room.game.crashRule ??= "freeze"; // a game begun before it plays v0.2, as before
     this.idle = Number(env.IDLE) || IDLE; // `wrangler dev --var IDLE:3000` shortens it, for check-online.mjs --expiry
     // The page pings every 5 s; the answer doesn't wake the room, and its time says the phone is there.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
