@@ -20,6 +20,8 @@
   .cover { background: #1d3b4a; color: #fff; border-radius: 12px; padding: 32px 16px; text-align: center; }
   .raid { color: #1a7f37; } .crash { color: #b42318; } .empty { color: #777; }
   .muted { color: #666; font-size: 15px; }
+  .bounty { background: #fff8e1; border-color: #d4a017; } .bounty b { font-size: 22px; } .bounty .t { font-size: 13px; margin: 1px; }
+  .t.any { background: #ddd; } .claim { color: #8a5a00; }
   table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid #ddd; padding: 4px; text-align: center; }
   input { font: inherit; padding: 8px; width: 100%; box-sizing: border-box; margin: 3px 0; }
 </style>
@@ -30,7 +32,7 @@
 <script src="howtoplay.js"></script>
 <script>
 // The rules and bots live in rules.js; this page is the hotseat: one screen, passed between the human seats.
-const { RULES, BOTS } = Rules;
+const { RULES, PROTO, BOTS } = Rules;
 const LETTERS = 'ABCDE';
 const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // names are typed by players, so escape before HTML
 const zeros = () => RULES.treasure.map(() => 0);
@@ -88,12 +90,45 @@ const tokens = counts => counts.map((n, c) => n ? `<span class="t" style="backgr
 const letters = counts => counts.map((n, c) => RULES.treasure[c].mark.repeat(n)).join('') || '–';
 const bestColour = p => { const n = Math.max(...p.haul), t = RULES.treasure[p.haul.indexOf(n)]; return `${n} ${n === 1 ? t.one : t.name}`; };
 const crashers = h => h.picks.flatMap((isl, q) => (isl !== null && h.results[isl].kind === 'crash' ? [q] : []));
+// Bounty cards (PI4 04): a card's needs drawn as coloured dots; grey dots are any colour. Its name with its icon.
+const B = k => `${PROTO.bounties[k].icon} ${PROTO.bounties[k].name}`;
+const anyDots = (n, mark) => `<span class="t any">${mark}</span>`.repeat(n);
+function dots(needs) {
+  if (Array.isArray(needs)) return needs.map((n, c) => chip(c).repeat(n)).join('');
+  if (needs.total) return `${anyDots(needs.total, '?')}<br><span class="muted">any ${needs.total}</span>`;
+  if (needs.colours) return `${anyDots(needs.colours, '≠')}<br><span class="muted">${needs.colours} colours</span>`;
+  if (needs.pairs) return `${anyDots(needs.pairs * 2, '2')}<br><span class="muted">${needs.pairs} pairs</span>`;
+  return `${anyDots(needs.house[0], '3')}${anyDots(needs.house[1], '2')}<br><span class="muted">${needs.house[0]} + ${needs.house[1]} of another</span>`;
+}
+const plural = (n, word) => `${n} more ${word}${n === 1 ? '' : 's'}`;
+// What a haul still needs for one bounty, in words: "1 Emerald", "2 more colours"
+function needText(haul, needs) {
+  if (Array.isArray(needs)) return needs.flatMap((n, c) => (n > haul[c] ? [`${n - haul[c]} ${n - haul[c] === 1 ? RULES.treasure[c].one : RULES.treasure[c].name}`] : [])).join(' and ');
+  return plural(Rules.dist(haul, needs), needs.colours ? 'colour' : 'treasure');
+}
+// The pick screen's hint for the seat picking: the face-up bounty nearest its haul (leftmost on a tie), and what it needs.
+function hint(q) {
+  if (!S.showing.length) return '';
+  const haul = S.players[q].haul, d = k => Rules.dist(haul, PROTO.bounties[k].needs);
+  const k = S.showing.reduce((a, b) => (d(b) < d(a) ? b : a));
+  return `<p class="muted">Closest bounty: ${B(k)}, ${d(k) ? `needs ${needText(haul, PROTO.bounties[k].needs)}` : 'you already meet it'}</p>`;
+}
+// One line per claim in a round, with the card that replaced it, and who lost a tie and why.
+function claimLines(h) {
+  return h.claims.map((c, i) => `<p class="claim">🏅 <b>${name(c.seat)}</b> claims ${B(c.bounty)}!${c.rivals.length
+    ? ` <span class="muted">(${names(c.rivals)} met it too: ${c.why === 'random' ? 'a tie, so chosen at random' : c.why === 'fewer bounties' ? `${name(c.seat)} has fewer bounties` : `${name(c.seat)} has the smaller haul`})</span>` : ''}
+    ${h.turned[i] !== undefined ? `New bounty: ${B(h.turned[i])}.` : 'No bounties left to turn up.'}</p>`).join('');
+}
+const claimedIn = (q, k) => S.history.find(h => h.claims.some(c => c.bounty === k && c.seat === q)).round;
 const bagOut = () => S.bagOut ? `<p class="crash"><b>The bag can't refill every island${S.crashRule === 'jettison' ? ' due one' : ''}: the game ends!</b></p>` : '';
 
 function board() {
-  return `<div class="row">${S.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
-    <div class="row">${S.players.map((p, q) => `<div class="card">${name(q)}${p.bot ? ` <span class="muted">🤖 ${p.bot}</span>` : ''}<br>${tokens(p.haul)}</div>`).join('')}</div>
-    <p class="muted">Round ${S.round} · first to ${RULES.winAt} of one colour wins · Crash rule: ${RULE[S.crashRule]}</p>`;
+  return `<p class="muted" style="margin: 0 0 4px">Bounties</p>
+    <div class="row">${S.showing.map(k => `<div class="card bounty"><b>${PROTO.bounties[k].icon}</b>${PROTO.bounties[k].name}<br>${dots(PROTO.bounties[k].needs)}</div>`).join('')
+      || '<p class="muted">No bounties left.</p>'}</div>
+    <div class="row">${S.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
+    <div class="row">${S.players.map((p, q) => `<div class="card">${name(q)}${p.bot ? ` <span class="muted">🤖 ${p.bot}</span>` : ''}<br>${tokens(p.haul)}${p.bounties.length ? `<br>${p.bounties.map(k => PROTO.bounties[k].icon).join(' ')}` : ''}</div>`).join('')}</div>
+    <p class="muted">Round ${S.round} · first to ${RULES.winAt} of one colour or ${PROTO.toWin} bounties wins · Crash rule: ${RULE[S.crashRule]}</p>`;
 }
 
 function resultLine(r, i) {
@@ -128,6 +163,7 @@ const views = {
     <p>Everyone else, look away!</p><button class="big" onclick="act.show()">I'm ${name(turn)}, show islands</button></div>`,
   pick: () => `<h2>${name(turn)}, choose an island</h2>
     <div class="row">${S.islands.map((pile, i) => `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
+    ${hint(turn)}
     <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>
     ${lastRound()}`,
   reveal: () => {
@@ -135,6 +171,7 @@ const views = {
     return `<h2>Reveal!</h2>
     <p>${h.picks.map((isl, q) => `<b>${name(q)}</b> → ${isl === null ? 'no island' : L(isl)}`).join(' · ')}</p>
     ${h.results.map(resultLine).join('')}
+    ${claimLines(h)}
     ${noStep ? jettisonLines(h) : ''}
     ${bagOut()}
     ${revealButton()}`;
@@ -156,8 +193,9 @@ const views = {
   end: () => {
     const all = S.history.flatMap(h => h.results);
     return `${S.unfinished ? '<h2>Game ended early</h2><p>Unfinished: nobody wins.</p>'
-      : `<h2>🏆 ${S.winners.map(q => `${name(q)} (${bestColour(S.players[q])})`).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'}!</h2>`}
-    ${S.bagOut ? `<p>The bag ran out, so the most of one colour won.</p>` : ''}
+      : `<h2>🏆 ${S.winners.map(q => `${name(q)} (${S.players[q].bounties.length >= PROTO.toWin ? `${S.players[q].bounties.length} bounties` : bestColour(S.players[q])})`).join(' & ')} ${S.winners.length > 1 ? 'share the win' : 'wins'}!</h2>`}
+    ${S.bagOut ? `<p>The bag ran out, so the most bounties won, then the most of one colour.</p>` : ''}
+    <p><b>Bounties</b></p>${S.players.map((p, q) => `<p>${name(q)}: ${p.bounties.map(k => `${B(k)} (round ${claimedIn(q, k)})`).join(', ') || 'none'}</p>`).join('')}
     <p>Rounds: <b>${S.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
        Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b> tokens</p>
     <table><tr><th>Round</th>${S.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
@@ -173,7 +211,7 @@ const views = {
 function setupView() {
   const crash = `Crash: nobody takes anything, and each of you jettisons 1 treasure from your haul onto any island. Every island that didn't crash and got no jettison gets ${RULES.refill} new treasure`;
   return `<h1>🏴‍☠️ Pirate Islands</h1>${PROTO_LINE}<p class="muted"><a href="../index.html">← All prototypes</a></p><p>Secretly pick an island. Alone? Take its whole pile.
-    Anyone else there? ${crash} from the bag. First to ${RULES.winAt} of one colour wins.</p>
+    Anyone else there? ${crash} from the bag. First to ${RULES.winAt} of one colour or ${PROTO.toWin} bounties wins.</p>
     <p>${RULES.treasure.map((t, c) => `${tokens(zeros().map((_, k) => +(k === c)))} ${t.name}`).join(' · ')}</p>
     <h2>Players</h2><div class="row">${[...Array(RULES.maxPlayers - RULES.minPlayers + 1)].map((_, k) => {
       const n = RULES.minPlayers + k;

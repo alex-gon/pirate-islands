@@ -1,22 +1,24 @@
 // The bot check for the Bounty cards prototype: 1,000 bot-only games across 3–5 seats and seeds, all on Jettison. Run: node check.js
-// Fails a game that throws, a Freeze game past 100 rounds, a lost or made-up token, or a view that lets a seat see what it
-// mustn't. Jettison games past 100 rounds are reported, not failed; one still going at 500 is ended early and reported.
+// Fails a game that throws, a lost or made-up token, a view that lets a seat see what it mustn't (the deck's order included),
+// a bounty claimed twice or claimed by a haul that didn't meet it, a tie for a bounty settled against rule 3, a winner who
+// hadn't won, or a game still going at 500 rounds. Jettison games past 100 rounds are reported, not failed.
 require('./rules.js');
-const { RULES, BOTS, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly, botPick, botJettison,
+const { RULES, PROTO, BOTS, meets, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly, botPick, botJettison,
         viewFor } = Rules;
 const kinds = BOTS.personalities.map(b => b.name), fails = [], long = [], rounds = { jettison: [], freeze: [] };
 const ends = { win: 0, bagOut: 0, unfinished: 0 };
+const byBounty = PROTO.bounties.map(() => 0), winBy = { colour: 0, bounties: 0, both: 0 };
 let seed = 1, skipped = 0, jettisons = 0, fullBag = RULES.perColour;
 const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647; // the check's own chance: seat order and skips
 // A view mustn't change when the hidden parts do: the bag, the seed, other seats' picks and jettisons this round, and older
 // reveals until the end.
 function leaks(state, seat) {
   const v = viewFor(state, seat), s = structuredClone(state), other = (q, x) => q !== seat && x;
-  s.bag = s.bag.map(n => n + 7); s.rng ^= 1;
+  s.bag = s.bag.map(n => n + 7); s.rng ^= 1; s.deck = s.deck.toReversed().concat(99);
   s.picks = s.picks?.map((p, q) => (other(q, p !== null) ? (p + 1) % s.islands.length : p));
   s.jettisons = s.jettisons?.map((j, q) => (other(q, j) ? { colour: j.colour + 1, island: j.island + 1 } : j));
   if (!s.winners) s.history = s.history.map((h, k) => (k < s.history.length - 1 ? { round: -1 } : h));
-  return 'bag' in v || 'rng' in v || 'jettisons' in v || (!v.over && 'history' in v) || JSON.stringify(v) !== JSON.stringify(viewFor(s, seat));
+  return 'bag' in v || 'rng' in v || 'deck' in v || 'jettisons' in v || (!v.over && 'history' in v) || JSON.stringify(v) !== JSON.stringify(viewFor(s, seat));
 }
 // Every token is in the bag, on an island or in a haul, and none is negative.
 const counted = state => RULES.treasure.every((_, c) => {
@@ -44,7 +46,7 @@ for (let g = 0; g < 1000; g++) {
   try {
     for (let r = 1; !state.winners; r++) {
       if (r > 100 && rule === 'freeze') throw Error('no end after 100 rounds');
-      if (r > 500) { stop(); break; }
+      if (r > 500) { stop(); throw Error('no end after 500 rounds'); }
       look();
       for (const [k, q] of seats.toSorted(() => rnd() - 0.5).entries()) {
         if (stopPicking && r === 3 && k === Math.floor(n / 2)) { stop(); break; }
@@ -55,8 +57,20 @@ for (let g = 0; g < 1000; g++) {
       }
       if (state.winners) break;
       if (!skips && !allPicked(state)) throw Error('a seat has no pick');
+      const held = state.players.map(p => p.bounties.length), before = [...state.showing];
       if (!resolve(state)) throw Error('resolve refused');
       look();
+      // Every claim was met when it was made, was face up, and went to fewer bounties, then the smaller haul (rule 3).
+      const h = state.history.at(-1), all = state.players.flatMap(p => p.bounties), size = q => state.players[q].haul.reduce((a, b) => a + b, 0);
+      if (new Set(all).size !== all.length) throw Error('a bounty was claimed twice');
+      if (state.showing.some(k => all.includes(k))) throw Error('a claimed bounty is still face up');
+      h.claims.forEach(c => {
+        if (!before.includes(c.bounty) || !meets(state.players[c.seat].haul, c.bounty)) throw Error('a bounty was claimed without being met');
+        if (c.rivals.some(q => !meets(state.players[q].haul, c.bounty))) throw Error("a rival didn't meet the bounty");
+        if (c.rivals.some(q => held[q] < held[c.seat] || (held[q] === held[c.seat] && size(q) < size(c.seat)))) throw Error('a tie went the wrong way');
+        byBounty[c.bounty]++;
+      });
+      before.forEach(k => { if (!h.claims.some(c => c.bounty === k) && state.players.some(p => meets(p.haul, k))) throw Error('a met bounty was left unclaimed'); });
       if (state.jettisons) {
         if (rule === 'freeze') throw Error('a Freeze game jettisoned');
         if (nextRound(state)) throw Error('a round started before the jettisons');
@@ -84,6 +98,11 @@ for (let g = 0; g < 1000; g++) {
       }
       if (!state.winners && !nextRound(state)) throw Error('nextRound refused');
     }
+    if (state.winners.length && !state.bagOut) state.winners.forEach(q => {
+      const p = state.players[q], colour = Math.max(...p.haul) >= RULES.winAt, b = p.bounties.length >= PROTO.toWin;
+      if (!colour && !b) throw Error('a winner had not won');
+      winBy[colour && b ? 'both' : colour ? 'colour' : 'bounties']++;
+    });
     rounds[rule].push(state.round); ends[state.unfinished ? 'unfinished' : state.bagOut ? 'bagOut' : 'win']++;
     if (state.round > 100) long.push(`game ${g} (${n} seats, seed ${g * 7919 + 1}): ${state.unfinished ? 'still going at 500 rounds, ended early' : `${state.round} rounds`}`);
   } catch (e) { fails.push(`game ${g} (${n} seats, ${rule}, seed ${g * 7919 + 1}, round ${state.round}): ${e.message}`); }
@@ -91,6 +110,8 @@ for (let g = 0; g < 1000; g++) {
 const span = a => `${Math.min(...a)}–${Math.max(...a)}, average ${(a.reduce((x, y) => x + y, 0) / a.length).toFixed(1)}`;
 console.log(`1000 games: ${fails.length} failures. Rounds: Jettison ${span(rounds.jettison)}.`,
             `Ended by a win ${ends.win}, by the bag ${ends.bagOut}, early ${ends.unfinished}. Seats skipped: ${skipped}. Jettisons: ${jettisons}.`);
+console.log(`Winners by 5 of a colour ${winBy.colour}, by ${PROTO.toWin} bounties ${winBy.bounties}, by both ${winBy.both}.`,
+            `Claims: ${PROTO.bounties.map((b, k) => `${b.icon} ${b.name} ${byBounty[k]}`).join(', ')}.`, '(The unchanged v0.3 fork averages 12.9 rounds on this check; a big drop means toWin should be 3.)');
 fails.slice(0, 10).forEach(f => console.log(' ', f));
 if (long.length) console.log(`Jettison games past 100 rounds: ${long.length}`), long.forEach(l => console.log(' ', l));
 process.exitCode = fails.length ? 1 : 0;

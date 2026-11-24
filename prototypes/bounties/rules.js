@@ -19,13 +19,31 @@ const RULES = {
   pickTimer: 60, nextTimer: 5, jettisonTimer: 30, // online only, in seconds: to pick, the reveal pause, to jettison. A room copies them at Start
 };
 // ---- Prototype: Bounty cards. This prototype's numbers, tunable; see the vault ticket "PI4 04 Bounty Cards" ----
-const PROTO = {};
+const PROTO = {
+  showing: 3,        // face-up bounties
+  toWin: 2,          // bounties that win (5 of one colour still wins too)
+  bounties: [        // needs: per-colour counts [R, E, S, G, P], or a rule: { total: 8 } / { colours: 4 } / { pairs: 3 } / { house: [3, 2] }
+    { name: 'Rainbow', icon: '🌈', needs: [1, 1, 1, 1, 1] },
+    { name: 'Three pairs', icon: '🎲', needs: { pairs: 3 } },
+    { name: 'Full house', icon: '🏠', needs: { house: [3, 2] } },
+    { name: 'Royal rubies', icon: '👑', needs: [3, 0, 0, 1, 0] },
+    { name: 'Ocean', icon: '🌊', needs: [0, 0, 3, 0, 1] },
+    { name: 'Jungle', icon: '🌴', needs: [0, 3, 0, 1, 0] },
+    { name: 'Moonlight', icon: '🌙', needs: [0, 0, 1, 0, 3] },
+    { name: "King's ransom", icon: '💰', needs: [0, 0, 0, 4, 0] },
+    { name: 'Big haul', icon: '🧺', needs: { total: 8 } },
+    { name: 'Colourful', icon: '🎨', needs: { colours: 4 } },
+    { name: 'Ruby & emerald', icon: '🍒', needs: [2, 2, 0, 0, 0] },
+    { name: 'Pearl & sapphire', icon: '🫧', needs: [0, 0, 2, 0, 2] },
+  ],
+};
 // ---- Bots: tuning for computer seats. A bot reads only public info: piles, hauls, last round's reveal ----
 const BOTS = {
   sets: 2,      // a token is worth 1, plus this much per token of its colour the player already holds
   winPull: 3,   // how much more an island counts when taking it would win the game
   herd: 3,      // a bot expects each rival to lean toward the piles worth most to that rival's haul; higher = more sure of it
   habit: 0.5,   // ...plus this extra pull toward their last pick
+  bounty: 2,    // a pile is worth this much more per token it brings the player closer to a face-up bounty (the one it helps most)
   canny: 0.5,   // share of rivals the bot expects to also dodge that crowd (0 = all naive, 1 = all canny)
   block: 1,     // how much a bot values crashing an island a rival would win on, against its own best island
   burned: 0.75, // a bot that crashed on an island last round values it this much as usual (1 = no memory)
@@ -37,6 +55,52 @@ const BOTS = {
 };
 const zeros = () => RULES.treasure.map(() => 0); // a pile, haul or bag: one count per colour
 const total = a => a.reduce((x, y) => x + y, 0);
+const add = (a, b) => a.map((n, c) => n + b[c]);
+
+// How many more tokens a haul needs to meet a bounty's needs, in any of its forms; 0 means it meets it.
+function dist(haul, needs) {
+  const short = (h, n) => Math.max(0, n - h);
+  if (Array.isArray(needs)) return total(needs.map((n, c) => short(haul[c], n)));
+  if (needs.total) return short(total(haul), needs.total);
+  if (needs.colours) return short(haul.filter(Boolean).length, needs.colours);
+  if (needs.pairs) return total(haul.map(h => short(h, 2)).sort((a, b) => a - b).slice(0, needs.pairs));
+  const [a, b] = needs.house; // 3 of one colour and 2 of another
+  return Math.min(...haul.flatMap((x, c) => haul.flatMap((y, d) => (c === d ? [] : [short(x, a) + short(y, b)]))));
+}
+const meets = (haul, k) => dist(haul, PROTO.bounties[k].needs) === 0; // k: a bounty's index in PROTO.bounties
+
+// Who has won at the check: 5 of one colour or toWin bounties.
+const won = (state, q) => Math.max(...state.players[q].haul) >= RULES.winAt || state.players[q].bounties.length >= PROTO.toWin;
+
+// Check for a winner, bounties first (rules 2–4): every face-up bounty a haul meets is claimed, a tie going to fewer bounties
+// held before this check, then fewer treasures in total, then random. Claimed cards are replaced at once from the deck (none
+// once it's empty); a new card can be claimed from the next check. Returns the claims, for the round's history.
+function claim(state) {
+  const { players } = state, held = players.map(p => p.bounties.length), claims = [];
+  state.showing.forEach(k => {
+    const who = players.flatMap((p, q) => (meets(p.haul, k) ? [q] : []));
+    if (!who.length) return;
+    let top = who, why = 'only';
+    for (const [key, reason] of [[q => held[q], 'fewer bounties'], [q => total(players[q].haul), 'smaller haul']]) {
+      if (top.length < 2) break;
+      const low = Math.min(...top.map(key)), next = top.filter(q => key(q) === low);
+      if (next.length < top.length) why = reason;
+      top = next;
+    }
+    if (top.length > 1) why = 'random';
+    const seat = top[Math.floor(rand(state) * top.length)];
+    players[seat].bounties.push(k);
+    claims.push({ seat, bounty: k, rivals: who.filter(q => q !== seat), why: who.length > 1 ? why : 'only' });
+  });
+  const turned = [];
+  state.showing = state.showing.flatMap(k => {
+    if (!claims.some(c => c.bounty === k)) return [k];
+    if (!state.deck.length) return [];
+    turned.push(state.deck[0]);
+    return [state.deck.shift()];
+  });
+  return { claims, turned };
+}
 
 // mulberry32: the game's only source of chance, kept in state.rng so a saved game carries on exactly.
 function rand(state) {
@@ -49,11 +113,15 @@ function rand(state) {
 // bots[i]: a personality name, or null for a person. A blank name becomes 'Player N'. crashRule: 'jettison' (v0.3,
 // each crasher puts 1 treasure from their haul onto any island) or 'freeze' (v0.2, a crashed island just gets no token).
 function newGame(names, bots, seed, crashRule = 'jettison') {
-  const state = { players: names.map((name, i) => ({ name: name.trim() ? name : `Player ${i + 1}`, haul: zeros(), bot: bots[i] ?? null })),
+  const state = { players: names.map((name, i) => ({ name: name.trim() ? name : `Player ${i + 1}`, haul: zeros(), bot: bots[i] ?? null, bounties: [] })),
                   islands: [], bag: RULES.treasure.map(() => RULES.perColour), rng: seed | 0, round: 1, picks: null, jettisons: null,
                   crashRule: crashRule === 'freeze' ? 'freeze' : 'jettison', history: [], winners: null, bagOut: false,
                   unfinished: false, maxIsland: RULES.startPile };
   state.islands = names.map(() => draw(state, zeros(), RULES.startPile));
+  // The bounty deck, shuffled by the game's own chance, and the face-up row (rule 1). Both hold indices into PROTO.bounties.
+  state.deck = PROTO.bounties.map((_, k) => k);
+  for (let k = state.deck.length - 1; k > 0; k--) { const j = Math.floor(rand(state) * (k + 1)); [state.deck[k], state.deck[j]] = [state.deck[j], state.deck[k]]; }
+  state.showing = state.deck.splice(0, PROTO.showing);
   startRound(state);
   return state;
 }
@@ -97,16 +165,25 @@ function jettison(state, seat, colour, island) {
 // jettisons[q]: false if seat q owes none, null until it jettisons, then { colour, island }.
 const allJettisoned = state => !!state.jettisons?.every(j => j !== null);
 
+// Bounties for bots: how much a pile brings a haul closer to the face-up bounty it helps most, and whether taking it would win
+// (5 of one colour, or enough bounties met to reach toWin; a tie for a bounty isn't foreseen).
+const pull = (state, h, pile) => BOTS.bounty * Math.max(0, ...state.showing.map(k => dist(h, PROTO.bounties[k].needs) - dist(add(h, pile), PROTO.bounties[k].needs)));
+const winsWith = (state, q, after) => Math.max(...after) >= RULES.winAt
+  || state.players[q].bounties.length + state.showing.filter(k => meets(after, k)).length >= PROTO.toWin;
+
 // "Spite", every bot and the stand-in alike: the token and island that cost least, adding what the token is worth to my
 // haul to the most any rival's worth for that island grows (winPull counts, so it won't hand a rival the win). A random
 // fraction breaks ties.
 function botJettison(state, me) {
   const { players, islands } = state, haul = players[me].haul;
-  const worth = (h, pile) => pile.reduce((a, n, c) => a + n * (1 + BOTS.sets * h[c]), 0) * (pile.some((n, c) => h[c] + n >= RULES.winAt) ? BOTS.winPull : 1);
+  const worth = (q, pile) => { const h = players[q].haul;
+    return (pile.reduce((a, n, c) => a + n * (1 + BOTS.sets * h[c]), 0) + pull(state, h, pile)) * (winsWith(state, q, add(h, pile)) ? BOTS.winPull : 1); };
   let best = null;
   haul.forEach((n, colour) => n && islands.forEach((pile, island) => {
-    const after = pile.map((m, c) => m + (c === colour)), gain = players.map((p, q) => (q === me ? 0 : worth(p.haul, after) - worth(p.haul, pile)));
-    const cost = 1 + BOTS.sets * (n - 1) + Math.max(...gain) + rand(state) / 100;
+    const one = zeros().map((_, c) => +(c === colour)), after = add(pile, one);
+    const gain = players.map((p, q) => (q === me ? 0 : worth(q, after) - worth(q, pile)));
+    const mine = pull(state, haul.map((m, c) => m - one[c]), one); // what the token is worth toward my bounties
+    const cost = 1 + BOTS.sets * (n - 1) + mine + Math.max(...gain) + rand(state) / 100;
     if (!best || cost < best.cost) best = { cost, colour, island };
   }));
   return { colour: best.colour, island: best.island };
@@ -119,8 +196,9 @@ function botPick(state, me, name = state.players[me].bot) {
   const { players, islands } = state, { greed, focus } = BOTS.personalities.find(b => b.name === name);
   const prev = state.history.at(-1), last = prev?.picks || []; // a skipped seat's pick is null: no habit pull, no burned island
   const crashed = prev?.results[last[me]]?.kind === 'crash' ? last[me] : -1, norm = w => { const t = total(w); return w.map(x => x / t); };
-  const wins = (q, i) => islands[i].some((n, c) => players[q].haul[c] + n >= RULES.winAt);
-  const worth = (q, i) => islands[i].reduce((a, n, c) => a + n * (1 + BOTS.sets * players[q].haul[c]), 0) * (wins(q, i) ? BOTS.winPull : 1);
+  const wins = (q, i) => winsWith(state, q, add(players[q].haul, islands[i]));
+  const worth = (q, i) => (islands[i].reduce((a, n, c) => a + n * (1 + BOTS.sets * players[q].haul[c]), 0) + pull(state, players[q].haul, islands[i]))
+    * (wins(q, i) ? BOTS.winPull : 1);
   const alone = (lean, q, i) => lean.reduce((a, l, r) => (r === q ? a : a * (1 - l[i])), 1);
   // A naive rival chases what's worth most to its own haul, and its last pick; a canny one also dodges the naive crowd.
   const naive = players.map((_, q) => norm(islands.map((_, i) => (worth(q, i) * (last[q] === i ? 1 + BOTS.habit : 1)) ** BOTS.herd)));
@@ -137,9 +215,10 @@ function botPick(state, me, name = state.players[me].bot) {
   return i;
 }
 
-// The tie order: most of one colour, then most different colours, then most pieces; whoever is level at the top shares.
+// The tie order: most bounties, then most of one colour, then most different colours, then most pieces; whoever is level at
+// the top shares. It also picks the winner when the bag runs out (rule 6).
 function leaders(state, seats) {
-  const key = q => { const h = state.players[q].haul; return (Math.max(...h) * 10 + h.filter(Boolean).length) * 100 + total(h); };
+  const key = q => { const p = state.players[q], h = p.haul; return p.bounties.length * 1e6 + (Math.max(...h) * 10 + h.filter(Boolean).length) * 100 + total(h); };
   const best = Math.max(...seats.map(key));
   return seats.filter(q => key(q) === best);
 }
@@ -155,10 +234,11 @@ function resolve(state) {
     if (who.length === 1) { pile.forEach((n, c) => players[who[0]].haul[c] += n); islands[i] = zeros(); }
     return { kind: who.length === 1 ? 'raid' : who.length ? 'crash' : 'empty', who, before: [...pile] };
   });
-  const seats = players.map((_, q) => q), set = seats.filter(q => Math.max(...players[q].haul) >= RULES.winAt);
+  const { claims, turned } = claim(state); // bounties are claimed at the check, before the win test (rules 2–4)
+  const seats = players.map((_, q) => q), set = seats.filter(q => won(state, q));
   if (set.length) state.winners = leaders(state, set);
   results.forEach((r, i) => (r.after = [...islands[i]]));
-  state.history.push({ round: state.round, picks: [...picks], results, jettisons: null }); // the full record; players see it only once the game is over
+  state.history.push({ round: state.round, picks: [...picks], results, jettisons: null, claims, turned }); // the full record; players see it only once the game is over
   state.picks = null;
   const owe = seats.map(q => results.some(r => r.kind === 'crash' && r.who.includes(q)) && total(players[q].haul) > 0 && null);
   if (!state.winners && state.crashRule === 'jettison' && owe.includes(null)) {
@@ -209,14 +289,14 @@ function endEarly(state) {
 // reveals before the game is over. seat = null for a spectator. jettisoning: the seat still owes a jettison.
 function viewFor(state, seat) {
   const s = structuredClone(state), over = s.winners !== null;
-  return { round: s.round, islands: s.islands, over, crashRule: s.crashRule,
-           players: s.players.map((p, q) => ({ name: p.name, haul: p.haul, bot: p.bot, picked: s.picks?.[q] != null,
+  return { round: s.round, islands: s.islands, over, crashRule: s.crashRule, showing: s.showing, // never the deck: its order is hidden
+           players: s.players.map((p, q) => ({ name: p.name, haul: p.haul, bot: p.bot, bounties: p.bounties, picked: s.picks?.[q] != null,
                                                jettisoning: s.jettisons?.[q] === null })),
            myPick: s.picks?.[seat] ?? null, myJettison: s.jettisons?.[seat] || null, last: s.history.at(-1) ?? null,
            winners: s.winners, bagOut: s.bagOut, unfinished: s.unfinished,
            ...(over && { history: s.history, maxIsland: s.maxIsland }) };
 }
 
-globalThis.Rules = { RULES, PROTO, BOTS, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly,
+globalThis.Rules = { RULES, PROTO, BOTS, dist, meets, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly,
                      botPick, botJettison, viewFor };
 })();
