@@ -34,7 +34,9 @@
       <li>If the bag can't refill every island that's due one, the game ends: most of one colour wins.</li>
     </ul>
     <h3>This prototype</h3>
-    <p>Nothing new yet.</p>`, // Bounty cards: its ticket replaces this with Alex's approved words (PI4 01). The Freeze card is unused
+    <p><b>This prototype: Bounty cards.</b> Three bounties are face up. If your haul has what a bounty shows
+      after a round, claim it, and you keep your treasure. <b>Win with 5 of one colour or 2 bounties.</b>
+      Two players meet the same bounty at once? Fewer bounties gets it, then smaller haul.</p>`, // Alex's approved words, PI4 04. The Freeze card is unused
     freeze: `<p><b>Be the first to collect 5 treasures of one colour.</b><br>Crash rule: <b>Freeze</b></p>
     <h3>A round</h3>
     <ol>
