@@ -34,7 +34,10 @@
       <li>If the bag can't refill every island that's due one, the game ends: most of one colour wins.</li>
     </ul>
     <h3>This prototype</h3>
-    <p>Nothing new yet.</p>`, // Captain cards: its ticket replaces this with Alex's approved words (PI4 01). The Freeze card is unused
+    <p><b>This prototype: Captain cards.</b> You each have three cards, and each works once per game. Play one face down with your island if you want.<br>
+      ⚓ <b>Anchor</b>: if you crash, don't jettison. Take 1 treasure from the bag instead.<br>
+      💣 <b>Cannon</b>: go nowhere. Fire at an island: nobody there takes anything, and it gets no new treasure.<br>
+      🧭 <b>Compass</b>: after the reveal, you may secretly change your island.</p>`, // Captain cards: Alex's approved words, word for word (PI4 02). The Freeze card is unused
     freeze: `<p><b>Be the first to collect 5 treasures of one colour.</b><br>Crash rule: <b>Freeze</b></p>
     <h3>A round</h3>
     <ol>

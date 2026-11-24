@@ -1,22 +1,29 @@
 // The bot check for the Captain cards prototype: 1,000 bot-only games across 3–5 seats and seeds, all on Jettison. Run: node check.js
 // Fails a game that throws, a Freeze game past 100 rounds, a lost or made-up token, or a view that lets a seat see what it
 // mustn't. Jettison games past 100 rounds are reported, not failed; one still going at 500 is ended early and reported.
+// Captain cards (PI4 02): every card is used at most once per player, a card not left is refused, the Compass step waits for
+// every new pick, Anchor draws keep the tokens counted, and a summary of the cards played and Cannons that stopped a win.
 require('./rules.js');
-const { RULES, BOTS, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly, botPick, botJettison,
-        viewFor } = Rules;
+const { RULES, PROTO, BOTS, newGame, pick, allPicked, compass, allCoursed, resolve, jettison, allJettisoned, refill, nextRound, endEarly,
+        botPlay, botCourse, botJettison, viewFor } = Rules;
 const kinds = BOTS.personalities.map(b => b.name), fails = [], long = [], rounds = { jettison: [], freeze: [] };
 const ends = { win: 0, bagOut: 0, unfinished: 0 };
 let seed = 1, skipped = 0, jettisons = 0, fullBag = RULES.perColour;
+const played = Object.fromEntries(PROTO.cards.map(c => [c, 0])), blasts = { all: 0, stopped: 0 }; let anchorWins = 0, steps = 0;
 const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647; // the check's own chance: seat order and skips
-// A view mustn't change when the hidden parts do: the bag, the seed, other seats' picks and jettisons this round, and older
-// reveals until the end.
+// A view mustn't change when the hidden parts do: the bag, the seed, other seats' picks, cards and jettisons this round (in the
+// Compass step the first picks and cards are revealed, but not the new picks), and older reveals until the end.
 function leaks(state, seat) {
   const v = viewFor(state, seat), s = structuredClone(state), other = (q, x) => q !== seat && x;
   s.bag = s.bag.map(n => n + 7); s.rng ^= 1;
-  s.picks = s.picks?.map((p, q) => (other(q, p !== null) ? (p + 1) % s.islands.length : p));
+  if (s.course) s.course = s.course.map((c, q) => (other(q, c !== null && c !== false) ? (c + 1) % s.islands.length : c));
+  else {
+    s.picks = s.picks?.map((p, q) => (other(q, p !== null) ? (p + 1) % s.islands.length : p));
+    s.plays = s.plays?.map((c, q) => (other(q, c !== null) ? (c === 'cannon' ? 'anchor' : 'cannon') : c));
+  }
   s.jettisons = s.jettisons?.map((j, q) => (other(q, j) ? { colour: j.colour + 1, island: j.island + 1 } : j));
   if (!s.winners) s.history = s.history.map((h, k) => (k < s.history.length - 1 ? { round: -1 } : h));
-  return 'bag' in v || 'rng' in v || 'jettisons' in v || (!v.over && 'history' in v) || JSON.stringify(v) !== JSON.stringify(viewFor(s, seat));
+  return 'bag' in v || 'rng' in v || 'jettisons' in v || 'plays' in v || 'course' in v || (!v.over && 'history' in v) || JSON.stringify(v) !== JSON.stringify(viewFor(s, seat));
 }
 // Every token is in the bag, on an island or in a haul, and none is negative.
 const counted = state => RULES.treasure.every((_, c) => {
@@ -49,19 +56,45 @@ for (let g = 0; g < 1000; g++) {
       for (const [k, q] of seats.toSorted(() => rnd() - 0.5).entries()) {
         if (stopPicking && r === 3 && k === Math.floor(n / 2)) { stop(); break; }
         if (skips && rnd() < 0.2) { skipped++; continue; }
-        if (state.picks[q] === null && !pick(state, q, botPick(state, q, kinds[q % 3]))) throw Error('a fair pick was refused');
+        const spent = PROTO.cards.find(c => state.players[q].cards[c] === 0);
+        if (state.picks[q] === null && (spent && pick(state, q, 0, spent) || pick(state, q, 0, 'sword'))) throw Error('a card not held was played');
+        const b = botPlay(state, q, kinds[q % 3]);
+        if (state.picks[q] === null && !pick(state, q, b.island, b.card)) throw Error('a fair pick was refused');
         if (pick(state, q, 0)) throw Error('a pick was changed');
         look();
       }
       if (state.winners) break;
       if (!skips && !allPicked(state)) throw Error('a seat has no pick');
+      const hauls = state.players.map(p => [...p.haul]); // before the round: no haul changes in the Compass step
       if (!resolve(state)) throw Error('resolve refused');
       look();
+      if (state.course) { // the Compass step: first picks revealed, every Compass seat picks again (a skipped one stays)
+        steps++;
+        if (nextRound(state) || pick(state, state.picks.indexOf(null) >= 0 ? state.picks.indexOf(null) : 0, 0)) throw Error('played on in the Compass step');
+        seats.forEach(q => { if (state.course[q] === false && compass(state, q, 0)) throw Error('a seat with no Compass changed course'); });
+        for (const q of seats.toSorted(() => rnd() - 0.5)) {
+          if (state.course[q] !== null) continue;
+          if (resolve(state)) throw Error('resolved before every new pick');
+          const to = skips && rnd() < 0.2 ? state.picks[q] : botCourse(state, q);
+          if (!compass(state, q, to)) throw Error('a fair new pick was refused');
+          if (compass(state, q, (to + 1) % n)) throw Error('a new pick was changed');
+          look();
+        }
+        if (!allCoursed(state)) throw Error('a Compass seat has no new pick');
+        if (!resolve(state)) throw Error('resolve refused after the Compass step');
+        look();
+      }
+      { // Cannons: count blasts, and those where a lone visitor would have won from the pile
+        const h = state.history.at(-1), before = hauls;
+        h.plays.forEach(c => { if (c) played[c]++; });
+        h.results.forEach(r => { if (r.kind === 'blasted') { blasts.all++; if (r.who.length === 1 && r.before.some((x, c) => before[r.who[0]][c] + x >= RULES.winAt)) blasts.stopped++; } });
+      }
       if (state.jettisons) {
         if (rule === 'freeze') throw Error('a Freeze game jettisoned');
         if (nextRound(state)) throw Error('a round started before the jettisons');
         if (stopJettison) { stop(); break; }
-        const crashed = state.history.at(-1).results.flatMap(x => (x.kind === 'crash' ? x.who : []));
+        const h = state.history.at(-1), crashed = h.results.flatMap(x => (x.kind === 'crash' ? x.who.filter(q => h.plays[q] !== 'anchor')
+          : x.kind === 'blasted' && PROTO.cannonCosts ? x.who : []));
         seats.forEach(q => {
           const owes = crashed.includes(q) && state.players[q].haul.some(Boolean);
           if (owes !== (state.jettisons[q] !== false)) throw Error(`seat ${q} owes the wrong jettison`);
@@ -82,8 +115,14 @@ for (let g = 0; g < 1000; g++) {
         jettisons += state.history.at(-1).jettisons.filter(Boolean).length;
         look();
       }
+      const h = state.history.at(-1);
+      if (h.anchors?.some(Boolean) && state.winners?.length && !state.bagOut) anchorWins++;
       if (!state.winners && !nextRound(state)) throw Error('nextRound refused');
     }
+    seats.forEach(q => PROTO.cards.forEach(c => {
+      const uses = state.history.filter(h => h.plays[q] === c).length;
+      if (uses > PROTO.copies || state.players[q].cards[c] !== PROTO.copies - uses) throw Error(`seat ${q} used ${c} ${uses} times`);
+    }));
     rounds[rule].push(state.round); ends[state.unfinished ? 'unfinished' : state.bagOut ? 'bagOut' : 'win']++;
     if (state.round > 100) long.push(`game ${g} (${n} seats, seed ${g * 7919 + 1}): ${state.unfinished ? 'still going at 500 rounds, ended early' : `${state.round} rounds`}`);
   } catch (e) { fails.push(`game ${g} (${n} seats, ${rule}, seed ${g * 7919 + 1}, round ${state.round}): ${e.message}`); }
@@ -91,6 +130,9 @@ for (let g = 0; g < 1000; g++) {
 const span = a => `${Math.min(...a)}–${Math.max(...a)}, average ${(a.reduce((x, y) => x + y, 0) / a.length).toFixed(1)}`;
 console.log(`1000 games: ${fails.length} failures. Rounds: Jettison ${span(rounds.jettison)}.`,
             `Ended by a win ${ends.win}, by the bag ${ends.bagOut}, early ${ends.unfinished}. Seats skipped: ${skipped}. Jettisons: ${jettisons}.`);
+console.log(`Cards per game: ${PROTO.cards.map(c => `${c} ${(played[c] / 1000).toFixed(2)}`).join(', ')}. Compass steps: ${steps}.`,
+            `Blasts: ${blasts.all}, ${blasts.stopped} stopping a lone rival's winning island. Anchor draws that won: ${anchorWins}.`,
+            `Average rounds ${(rounds.jettison.reduce((x, y) => x + y, 0) / rounds.jettison.length).toFixed(1)} (v0.3: 12.6).`);
 fails.slice(0, 10).forEach(f => console.log(' ', f));
 if (long.length) console.log(`Jettison games past 100 rounds: ${long.length}`), long.forEach(l => console.log(' ', l));
 process.exitCode = fails.length ? 1 : 0;
