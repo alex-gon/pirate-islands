@@ -34,7 +34,10 @@
       <li>If the bag can't refill every island that's due one, the game ends: most of one colour wins.</li>
     </ul>
     <h3>This prototype</h3>
-    <p>Nothing new yet.</p>`, // Weather: its ticket replaces this with Alex's approved words (PI4 01). The Freeze card is unused
+    <p><b>This prototype: Weather.</b> Each round starts with a weather card, which changes that round only.
+      ☀️ Fair Winds: nothing. · ⛈️ Storm: one island is closed. · 🌊 Calm Seas: no jettisons. ·
+      🌬️ Trade Winds: every island gets 1 treasure now. · 🐙 Kraken: the biggest pile loses 2 now. ·
+      🎁 Treasure Tide: raid alone and take 1 more from the bag. · 😴 Doldrums: no new treasure.</p>`, // Alex's approved words (PI4 06). The Freeze card is unused
     freeze: `<p><b>Be the first to collect 5 treasures of one colour.</b><br>Crash rule: <b>Freeze</b></p>
     <h3>A round</h3>
     <ol>
