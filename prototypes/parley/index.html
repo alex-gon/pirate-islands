@@ -220,7 +220,7 @@ const views = {
     <p>Rounds: <b>${S.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
        Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b> tokens ·
        🏳️ Shares: <b>${all.filter(r => r.kind === 'share').length}</b> · Grabs: <b>${all.filter(r => r.kind === 'grab').length}</b></p>
-    <table><tr><th>Round</th>${S.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
+    <div style="overflow-x: auto"><table><tr><th>Round</th>${S.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
     ${S.history.map(h => `<tr><td>${h.round}</td>${h.picks.map((isl, q) => {
       const r = h.results[isl], j = h.jettisons?.[q];
       if (!r) return '<td>–</td>'; // skipped: no island
@@ -228,7 +228,7 @@ const views = {
       const cell = r.kind === 'raid' || r.kind === 'grab' && r.grabbers.includes(q) ? ` +${letters(r.before)}` : r.kind === 'share' ? ` +${got || '–'}`
         : r.kind === 'grab' ? ' –' : ` 💥${j ? ` ${RULES.treasure[j.colour].mark}→${L(j.island)}` : ''}`;
       return `<td class="${r.kind === 'share' || r.kind === 'grab' && r.grabbers.includes(q) ? 'raid' : r.kind === 'grab' ? 'empty' : r.kind}">${L(isl)}${flag}${cell}</td>`;
-    }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table>
+    }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table></div>
     <button class="big" onclick="act.again()">New game</button>`;
   },
 };

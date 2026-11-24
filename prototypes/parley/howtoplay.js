@@ -34,10 +34,15 @@
       <li>If the bag can't refill every island that's due one, the game ends: most of one colour wins.</li>
     </ul>
     <h3>This prototype</h3>
-    <p><b>This prototype: The Parley flag.</b> One island flies 🏳️ the Parley flag. With every pick, also
+    ${Rules.PROTO.parleyIslands === 'all'
+    ? `<p><b>This prototype: The Parley flag.</b> Every island flies 🏳️ the Parley flag. With every pick, also
+      secretly choose ✊ <b>Grab</b> or 🤝 <b>Share</b>. At the island you picked:
+      alone, take it all · <b>everyone shares</b>: take turns, smallest haul first, until it's gone ·
+      <b>one grabs</b>: the grabber takes it all · <b>two or more grab</b>: crash, and the grabbers jettison.</p>`
+    : `<p><b>This prototype: The Parley flag.</b> One island flies 🏳️ the Parley flag. With every pick, also
       secretly choose ✊ <b>Grab</b> or 🤝 <b>Share</b>. It only counts at Parley:
       alone, take it all · <b>everyone shares</b>: take turns, smallest haul first, until it's gone ·
-      <b>one grabs</b>: the grabber takes it all · <b>two or more grab</b>: crash, and the grabbers jettison.</p>`, // Alex's approved words, PI4 08. The Freeze card is unused
+      <b>one grabs</b>: the grabber takes it all · <b>two or more grab</b>: crash, and the grabbers jettison.</p>`}`, // Alex's approved words, PI4 08 (the every-island words adapt them, 2026-11-23). The Freeze card is unused
     freeze: `<p><b>Be the first to collect 5 treasures of one colour.</b><br>Crash rule: <b>Freeze</b></p>
     <h3>A round</h3>
     <ol>

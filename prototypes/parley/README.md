@@ -1,6 +1,7 @@
 # Pirate Islands: The Parley flag
 
-A v0.4 prototype: one island where you secretly Grab or Share.
+A v0.4 prototype: you secretly Grab or Share with every pick. Since 2026-11-23 every island flies the Parley flag
+(`PROTO.parleyIslands: 'all'`); set it to `1` for the original one-island version.
 
 - **Spec:** the vault ticket "PI4 08 Parley Flag" (`~/code/vault/Projects/Pirate Islands v0.4 Prototypes/`). Its rules are a
   approved by Alex on 2026-11-23, with three answers recorded there (a last-Parley badge, fewest pieces first, auto Share

@@ -20,8 +20,8 @@ const RULES = {
 };
 // ---- Prototype: The Parley flag. This prototype's numbers, tunable; see the vault ticket "PI4 08 Parley Flag" ----
 const PROTO = {
-  parleyIslands: 1,        // islands that fly the flag, chosen at random at setup
-  extraIsland: false,      // true: the Parley island is added on top of the usual one-per-player islands
+  parleyIslands: 'all',    // 'all': every island flies the flag (Alex, 2026-11-23, after the first play) · a number: that many, at random at setup
+  extraIsland: false,      // true: the Parley island is added on top of the usual one-per-player islands (ignored with 'all')
   shareLeftover: 'taken',  // 'taken': share until the pile is empty · 'stays': only full rounds, leftovers stay (the Lagoon's way)
   grabberAloneTakes: 'all',// 'all': a lone grabber among sharers takes the whole pile (the only setting so far)
   sharersJettison: false,  // true: sharers who lose to a grab, or sit in a double-grab crash, jettison too
@@ -65,10 +65,12 @@ function newGame(names, bots, seed, crashRule = 'jettison') {
                   crashRule: crashRule === 'freeze' ? 'freeze' : 'jettison', history: [], winners: null, bagOut: false,
                   unfinished: false, maxIsland: RULES.startPile,
                   parley: [], stances: null, lastStance: names.map(() => null), share: null };
-  const n = names.length + (PROTO.extraIsland ? PROTO.parleyIslands : 0);
+  const every = PROTO.parleyIslands === 'all';
+  const n = names.length + (PROTO.extraIsland && !every ? PROTO.parleyIslands : 0);
   state.islands = [...Array(n)].map(() => draw(state, zeros(), RULES.startPile));
-  // The Parley flag (PI4 08): the added islands, or islands at random. It doesn't move during a game.
-  if (PROTO.extraIsland) state.parley = [...Array(n).keys()].slice(names.length);
+  // The Parley flag (PI4 08): every island, or the added islands, or islands at random. It doesn't move during a game.
+  if (every) state.parley = [...Array(n).keys()];
+  else if (PROTO.extraIsland) state.parley = [...Array(n).keys()].slice(names.length);
   while (state.parley.length < Math.min(PROTO.parleyIslands, n)) {
     const i = Math.floor(rand(state) * n);
     if (!state.parley.includes(i)) state.parley.push(i);
