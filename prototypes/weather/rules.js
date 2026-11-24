@@ -19,7 +19,19 @@ const RULES = {
   pickTimer: 60, nextTimer: 5, jettisonTimer: 30, // online only, in seconds: to pick, the reveal pause, to jettison. A room copies them at Start
 };
 // ---- Prototype: Weather. This prototype's numbers, tunable; see the vault ticket "PI4 06 Weather" ----
-const PROTO = {};
+const PROTO = {
+  deck: [ // the weather deck; change n to make a card more or less common, set n: 0 to leave one out
+    { key: 'fair',    name: 'Fair Winds',    icon: '☀️', n: 3, says: 'A calm day.' },
+    { key: 'storm',   name: 'Storm',         icon: '⛈️', n: 2, closes: 1, says: 'Storm over one island: nobody can go there.' },
+    { key: 'calm',    name: 'Calm Seas',     icon: '🌊', n: 2, noJettison: true, says: 'No jettisons this round.' },
+    { key: 'trade',   name: 'Trade Winds',   icon: '🌬️', n: 2, addNow: 1, says: 'Every island gets 1 treasure now.' },
+    { key: 'kraken',  name: 'Kraken',        icon: '🐙', n: 1, eatNow: 2, says: 'The biggest pile loses 2 now.' },
+    { key: 'tide',    name: 'Treasure Tide', icon: '🎁', n: 1, raidBonus: 1, says: 'Raid alone: take 1 more from the bag.' },
+    { key: 'doldrum', name: 'Doldrums',      icon: '😴', n: 1, noRefill: true, says: 'No new treasure this round.' },
+  ],
+  calmBlock: 1.5, calmGreed: 0.5, // bots under Calm Seas, where a crash costs nothing: BOTS.block × calmBlock, greed + calmGreed
+};
+const card = key => PROTO.deck.find(c => c.key === key); // a weather card by key
 // ---- Bots: tuning for computer seats. A bot reads only public info: piles, hauls, last round's reveal ----
 const BOTS = {
   sets: 2,      // a token is worth 1, plus this much per token of its colour the player already holds
@@ -52,7 +64,8 @@ function newGame(names, bots, seed, crashRule = 'jettison') {
   const state = { players: names.map((name, i) => ({ name: name.trim() ? name : `Player ${i + 1}`, haul: zeros(), bot: bots[i] ?? null })),
                   islands: [], bag: RULES.treasure.map(() => RULES.perColour), rng: seed | 0, round: 1, picks: null, jettisons: null,
                   crashRule: crashRule === 'freeze' ? 'freeze' : 'jettison', history: [], winners: null, bagOut: false,
-                  unfinished: false, maxIsland: RULES.startPile };
+                  unfinished: false, maxIsland: RULES.startPile, weatherDeck: [], weatherUsed: PROTO.deck.flatMap(c => Array(c.n).fill(c.key)),
+                  weather: null };
   state.islands = names.map(() => draw(state, zeros(), RULES.startPile));
   startRound(state);
   return state;
@@ -68,16 +81,51 @@ function draw(state, pile, n) {
   return pile;
 }
 
-// Every seat starts without a pick (null), then the bot seats pick.
+// Shuffle the used weather cards into a new deck (Fisher-Yates on the seeded rand).
+function reshuffle(state) {
+  const d = state.weatherUsed; state.weatherUsed = [];
+  for (let i = d.length - 1; i > 0; i--) { const j = Math.floor(rand(state) * (i + 1)); [d[i], d[j]] = [d[j], d[i]]; }
+  state.weatherDeck = d;
+}
+
+// The Weather step: turn up the top card (reshuffling an empty deck) and do its "now" effects, before anyone picks.
+// state.weather: { key, closed: the Storm's island or null, island: the Kraken's pile or null, eaten: what it took or null,
+// added: whether Trade Winds drew }. Trade Winds draws 1 onto every island, or none if the bag can't cover them all. The Kraken
+// returns up to 2 random tokens from the biggest pile (a tie picked at random) to the bag; on empty islands it does nothing.
+function turnWeather(state) {
+  if (!state.weatherDeck.length) reshuffle(state);
+  const key = state.weatherDeck.shift(), c = card(key), { islands } = state, w = { key, closed: null, island: null, eaten: null, added: false };
+  state.weatherUsed.push(key);
+  if (c.closes) w.closed = Math.floor(rand(state) * islands.length);
+  if (c.addNow && total(state.bag) >= islands.length * c.addNow) { islands.forEach(pile => draw(state, pile, c.addNow)); w.added = true; }
+  if (c.eatNow) {
+    const most = Math.max(...islands.map(total)), big = islands.flatMap((p, i) => (total(p) === most ? [i] : []));
+    if (most > 0) {
+      const i = big[Math.floor(rand(state) * big.length)], pile = islands[i], eaten = zeros();
+      for (let k = 0; k < c.eatNow && total(pile); k++) {
+        let r = rand(state) * total(pile), col = 0;
+        while (r >= pile[col]) r -= pile[col++];
+        pile[col]--; state.bag[col]++; eaten[col]++;
+      }
+      Object.assign(w, { island: i, eaten });
+    }
+  }
+  state.weather = w;
+  state.maxIsland = Math.max(state.maxIsland, ...islands.map(total));
+}
+
+// Every round starts with its weather, then every seat starts without a pick (null), then the bot seats pick.
 function startRound(state) {
+  turnWeather(state);
   state.picks = state.players.map(() => null);
   state.players.forEach((p, q) => { if (p.bot) state.picks[q] = botPick(state, q); });
 }
 
 // Records a pick. Refuses between rounds and once the game is over (picks is null then), a seat that
-// has already picked (a pick is final), and a seat or island that doesn't exist.
+// has already picked (a pick is final), a seat or island that doesn't exist, and the island a Storm has closed.
 function pick(state, seat, island) {
-  if (state.picks?.[seat] !== null || !Number.isInteger(island) || island < 0 || island >= state.islands.length) return false;
+  if (state.picks?.[seat] !== null || !Number.isInteger(island) || island < 0 || island >= state.islands.length
+    || island === state.weather?.closed) return false;
   state.picks[seat] = island;
   return true;
 }
@@ -115,12 +163,18 @@ function botJettison(state, me) {
 // "Guess the crowd": predict where each rival goes from their haul, score each island by (chance I'm there alone) x
 // what its pile is worth to my haul ^greed, add the value of blocking a rival's winning island, then pick at weighted random.
 // name defaults to the seat's own bot; the server passes one to play a dropped player's seat.
+// Weather (PI4 06): never the Storm's island; under Calm Seas less crash fear (more block, more greed); under Treasure Tide
+// a lone raid is worth one average token more. "Now" effects are already on the piles.
 function botPick(state, me, name = state.players[me].bot) {
-  const { players, islands } = state, { greed, focus } = BOTS.personalities.find(b => b.name === name);
+  const { players, islands } = state, { focus } = BOTS.personalities.find(b => b.name === name), c = card(state.weather.key);
+  const greed = BOTS.personalities.find(b => b.name === name).greed + (c.noJettison ? PROTO.calmGreed : 0);
+  const block = BOTS.block * (c.noJettison ? PROTO.calmBlock : 1), shut = state.weather.closed, open = i => i !== shut;
   const prev = state.history.at(-1), last = prev?.picks || []; // a skipped seat's pick is null: no habit pull, no burned island
-  const crashed = prev?.results[last[me]]?.kind === 'crash' ? last[me] : -1, norm = w => { const t = total(w); return w.map(x => x / t); };
+  const crashed = prev?.results[last[me]]?.kind === 'crash' ? last[me] : -1;
+  const norm = w => { w = w.map((x, i) => (open(i) ? x : 0)); const t = total(w); return t ? w.map(x => x / t) : w.map((_, i) => +open(i)); }; // all 0: any open island
   const wins = (q, i) => islands[i].some((n, c) => players[q].haul[c] + n >= RULES.winAt);
-  const worth = (q, i) => islands[i].reduce((a, n, c) => a + n * (1 + BOTS.sets * players[q].haul[c]), 0) * (wins(q, i) ? BOTS.winPull : 1);
+  const tide = q => (c.raidBonus || 0) * (1 + BOTS.sets * total(players[q].haul) / RULES.treasure.length); // an average token to q
+  const worth = (q, i) => (islands[i].reduce((a, n, col) => a + n * (1 + BOTS.sets * players[q].haul[col]), 0) + tide(q)) * (wins(q, i) ? BOTS.winPull : 1);
   const alone = (lean, q, i) => lean.reduce((a, l, r) => (r === q ? a : a * (1 - l[i])), 1);
   // A naive rival chases what's worth most to its own haul, and its last pick; a canny one also dodges the naive crowd.
   const naive = players.map((_, q) => norm(islands.map((_, i) => (worth(q, i) * (last[q] === i ? 1 + BOTS.habit : 1)) ** BOTS.herd)));
@@ -129,11 +183,12 @@ function botPick(state, me, name = state.players[me].bot) {
   const best = Math.max(...islands.map((_, i) => worth(me, i))) ** greed;
   const weights = islands.map((_, i) => {
     const threat = 1 - lean.reduce((a, l, q) => (q !== me && wins(q, i) ? a * (1 - l[i]) : a), 1);
-    const value = alone(lean, me, i) * worth(me, i) ** greed + BOTS.block * threat * best;
-    return (value * (i === crashed ? BOTS.burned : 1)) ** focus;
+    const value = alone(lean, me, i) * worth(me, i) ** greed + block * threat * best;
+    return open(i) ? (value * (i === crashed ? BOTS.burned : 1)) ** focus : 0;
   });
+  if (!(total(weights) > 0)) weights.forEach((_, i) => (weights[i] = +open(i))); // nothing worth anything: any open island
   let r = rand(state) * total(weights), i = 0;
-  while (r > weights[i] && i < weights.length - 1) r -= weights[i++];
+  while ((r > weights[i] || !weights[i]) && i < weights.length - 1) r -= weights[i++];
   return i;
 }
 
@@ -153,15 +208,19 @@ function resolve(state) {
   const results = islands.map((pile, i) => {
     const who = picks.flatMap((isl, q) => (isl === i ? [q] : []));
     if (who.length === 1) { pile.forEach((n, c) => players[who[0]].haul[c] += n); islands[i] = zeros(); }
-    return { kind: who.length === 1 ? 'raid' : who.length ? 'crash' : 'empty', who, before: [...pile] };
+    return { kind: who.length === 1 ? 'raid' : who.length ? 'crash' : 'empty', who, before: [...pile], bonus: null };
   });
+  // Treasure Tide: each lone raider also draws from the bag, before the win check. A bag that can't give every one of them
+  // their bonus gives none (Alex, PI4 06).
+  const bonus = card(state.weather.key).raidBonus, raids = results.filter(r => r.kind === 'raid');
+  if (bonus && total(state.bag) >= raids.length * bonus) raids.forEach(r => { r.bonus = draw(state, zeros(), bonus); r.bonus.forEach((n, c) => players[r.who[0]].haul[c] += n); });
   const seats = players.map((_, q) => q), set = seats.filter(q => Math.max(...players[q].haul) >= RULES.winAt);
   if (set.length) state.winners = leaders(state, set);
   results.forEach((r, i) => (r.after = [...islands[i]]));
-  state.history.push({ round: state.round, picks: [...picks], results, jettisons: null }); // the full record; players see it only once the game is over
+  state.history.push({ round: state.round, picks: [...picks], results, jettisons: null, weather: { ...state.weather } }); // the full record; players see it only once the game is over
   state.picks = null;
   const owe = seats.map(q => results.some(r => r.kind === 'crash' && r.who.includes(q)) && total(players[q].haul) > 0 && null);
-  if (!state.winners && state.crashRule === 'jettison' && owe.includes(null)) {
+  if (!state.winners && state.crashRule === 'jettison' && owe.includes(null) && !card(state.weather.key).noJettison) { // Calm Seas: none owed
     state.jettisons = owe;
     players.forEach((p, q) => { if (p.bot && owe[q] === null) state.jettisons[q] = botJettison(state, q); });
   } else finish(state);
@@ -177,11 +236,12 @@ function refill(state) {
 
 // Reveal every jettison together, moving each token from its haul onto its island, then refill every island that didn't
 // crash or get a jettison. The bag-out check counts only those: 0 due draws nothing and play goes on. A won round draws nothing.
+// Doldrums skips the refill and its bag-out check: nothing is due.
 function finish(state) {
   const { players, islands, bag, jettisons } = state, h = state.history.at(-1);
   jettisons?.forEach((j, q) => { if (j) { players[q].haul[j.colour]--; islands[j.island][j.colour]++; } });
   const due = islands.filter((_, i) => h.results[i].kind !== 'crash' && !jettisons?.some(j => j && j.island === i));
-  if (!state.winners) {
+  if (!state.winners && !card(state.weather.key).noRefill) {
     if (total(bag) < due.length * RULES.refill) { state.winners = leaders(state, players.map((_, q) => q)); state.bagOut = true; }
     else due.forEach(pile => draw(state, pile, RULES.refill));
   }
@@ -206,17 +266,18 @@ function endEarly(state) {
 }
 
 // What one seat may see, as a copy: never the bag or its count, another seat's pick or jettison this round, or older
-// reveals before the game is over. seat = null for a spectator. jettisoning: the seat still owes a jettison.
+// reveals before the game is over, or the weather deck's order (only how many cards are left). seat = null for a spectator.
+// jettisoning: the seat still owes a jettison.
 function viewFor(state, seat) {
   const s = structuredClone(state), over = s.winners !== null;
   return { round: s.round, islands: s.islands, over, crashRule: s.crashRule,
            players: s.players.map((p, q) => ({ name: p.name, haul: p.haul, bot: p.bot, picked: s.picks?.[q] != null,
                                                jettisoning: s.jettisons?.[q] === null })),
            myPick: s.picks?.[seat] ?? null, myJettison: s.jettisons?.[seat] || null, last: s.history.at(-1) ?? null,
-           winners: s.winners, bagOut: s.bagOut, unfinished: s.unfinished,
+           winners: s.winners, bagOut: s.bagOut, unfinished: s.unfinished, weather: s.weather, weatherLeft: s.weatherDeck.length,
            ...(over && { history: s.history, maxIsland: s.maxIsland }) };
 }
 
-globalThis.Rules = { RULES, PROTO, BOTS, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly,
+globalThis.Rules = { RULES, PROTO, BOTS, card, newGame, pick, allPicked, resolve, jettison, allJettisoned, refill, nextRound, endEarly,
                      botPick, botJettison, viewFor };
 })();
