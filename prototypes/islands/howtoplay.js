@@ -34,7 +34,17 @@
       <li>If the bag can't refill every island that's due one, the game ends: most of one colour wins.</li>
     </ul>
     <h3>This prototype</h3>
-    <p>Nothing new yet.</p>`, // Island personalities: its ticket replaces this with Alex's approved words (PI4 01). The Freeze card is unused
+    <p><b>This prototype: Island personalities.</b> Every island has its own rule, shown on it.</p>
+    <ul>
+      <li>🏝️ Calm Lagoon: crash here? Share the pile instead, smallest haul first.</li>
+      <li>🌋 Volcano: grows by 2, but a crash destroys the pile.</li>
+      <li>⚓ Shipwreck Reef: always grows, even after a crash.</li>
+      <li>💎 Treasure Cove: raid it alone, take 1 more from the bag.</li>
+      <li>🕳️ Smugglers' Den: its treasure is hidden.</li>
+      <li>💀 Skull Rock: crash here, jettison 2.</li>
+      <li>🏖️ Sandbar: never grows, but crashing here is free.</li>
+      <li>🐢 Turtle Island: starts with 4.</li>
+    </ul>`, // Island personalities: Alex's approved words, PI4 03 (one line per tile). The Freeze card is unused
     freeze: `<p><b>Be the first to collect 5 treasures of one colour.</b><br>Crash rule: <b>Freeze</b></p>
     <h3>A round</h3>
     <ol>
