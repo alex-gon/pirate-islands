@@ -21,6 +21,11 @@
   .raid { color: #1a7f37; } .crash { color: #b42318; } .empty { color: #777; }
   .muted { color: #666; font-size: 15px; }
   table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid #ddd; padding: 4px; text-align: center; }
+  .weather { display: flex; gap: 10px; align-items: center; border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; border: 2px solid #0002; }
+  .weather .icon { font-size: 34px; } .weather b { font-size: 19px; }
+  .w-fair { background: #fff6c8; } .w-storm { background: #d9dde6; } .w-calm { background: #d4eef7; } .w-trade { background: #e3f2e1; }
+  .w-kraken { background: #ead9f2; } .w-tide { background: #fde3ec; } .w-doldrum { background: #ece7dc; }
+  .wcard { text-align: center; padding: 28px 16px; } .wcard .icon { display: block; font-size: 72px; }
   input { font: inherit; padding: 8px; width: 100%; box-sizing: border-box; margin: 3px 0; }
 </style>
 </head>
@@ -30,7 +35,7 @@
 <script src="howtoplay.js"></script>
 <script>
 // The rules and bots live in rules.js; this page is the hotseat: one screen, passed between the human seats.
-const { RULES, BOTS } = Rules;
+const { RULES, BOTS, card } = Rules;
 const LETTERS = 'ABCDE';
 const esc = s => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`); // names are typed by players, so escape before HTML
 const zeros = () => RULES.treasure.map(() => 0);
@@ -41,6 +46,21 @@ let S = null; // the game in play, a Rules state; null = setup screen
 let phase, turn, sel, jsel; // the screen showing, whose turn it is, the island (or jettison) chosen but not locked in
 let setup = { count: 3, names: ['Alex', 'Jamie', 'Morgan', 'Player 4', 'Player 5'], bots: [null, null, null, null, null], rot: 0 }; // prototypes play Jettison only (PI4 01)
 const humans = () => S.players.filter(p => !p.bot).length;
+
+// Weather (PI4 06): the card in play, the round's one-line news for the weather screen, and a note in the results
+const weather = () => card(S.weather.key);
+function says(w = S.weather) {
+  const c = card(w.key);
+  if (c.closes) return `Storm over ${L(w.closed)}: nobody can go there.`;
+  return c.says;
+}
+function news() {
+  const w = S.weather, c = card(w.key);
+  if (c.addNow) return w.added ? 'Every island got 1 treasure.' : "The bag couldn't give every island 1, so none came.";
+  if (c.eatNow) return w.eaten ? `Island ${L(w.island)} lost ${tokens(w.eaten)} to the deep.` : 'Every island is empty, so it found nothing.';
+  return says();
+}
+const banner = () => `<div class="weather w-${S.weather.key}"><span class="icon">${weather().icon}</span><span><b>${weather().name}</b><br>${says()}</span></div>`;
 
 // The bots have already picked; show the next human seat, or resolve once every seat has picked. Pass screens only with 2+ humans.
 function advance() {
@@ -61,7 +81,8 @@ const act = {
   count(n) { setup.count = n; render(); },
   name(i, v) { setup.names[i] = v; },
   bot(i) { setup.bots[i] = setup.bots[i] === null ? BOTS.personalities[setup.rot++ % BOTS.personalities.length].name : null; render(); },
-  start() { S = Rules.newGame(setup.names.slice(0, setup.count).map(n => n.trim()), setup.bots, Date.now(), 'jettison'); advance(); render(); },
+  start() { S = Rules.newGame(setup.names.slice(0, setup.count).map(n => n.trim()), setup.bots, Date.now(), 'jettison'); phase = 'weather'; render(); },
+  sail() { advance(); render(); },
   show() { phase = 'pick'; sel = null; render(); },
   choose(i) { sel = i; render(); },
   lock() { Rules.pick(S, turn, sel); advance(); render(); },
@@ -72,7 +93,7 @@ const act = {
   jlock() { Rules.jettison(S, turn, jsel.colour, jsel.island); jadvance(); render(); },
   next() {
     if (S.winners) phase = 'end';
-    else { Rules.nextRound(S); advance(); }
+    else { Rules.nextRound(S); phase = 'weather'; }
     render();
   },
   end() { if (confirm('End this game now? It ends unfinished: nobody wins.')) { Rules.endEarly(S); phase = 'end'; render(); } },
@@ -91,18 +112,27 @@ const crashers = h => h.picks.flatMap((isl, q) => (isl !== null && h.results[isl
 const bagOut = () => S.bagOut ? `<p class="crash"><b>The bag can't refill every island${S.crashRule === 'jettison' ? ' due one' : ''}: the game ends!</b></p>` : '';
 
 function board() {
-  return `<div class="row">${S.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
+  return `${phase === 'end' ? '' : banner()}<div class="row">${S.islands.map((pile, i) => `<div class="card">Island ${L(i)}<br>${tokens(pile)}</div>`).join('')}</div>
     <div class="row">${S.players.map((p, q) => `<div class="card">${name(q)}${p.bot ? ` <span class="muted">🤖 ${p.bot}</span>` : ''}<br>${tokens(p.haul)}</div>`).join('')}</div>
     <p class="muted">Round ${S.round} · first to ${RULES.winAt} of one colour wins · Crash rule: ${RULE[S.crashRule]}</p>`;
 }
 
 function resultLine(r, i) {
-  if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone and took ${tokens(r.before)}! Now: ${tokens(r.after)}</p>`;
+  const w = S.history.at(-1).weather, c = card(w.key);
+  if (r.kind === 'raid') return `<p class="raid"><b>${L(i)}:</b> ${names(r.who)} raided it alone and took ${tokens(r.before)}!${r.bonus ? ` 🎁 Treasure Tide: +${tokens(r.bonus)} from the bag.` : ''} Now: ${tokens(r.after)}</p>`;
   if (r.kind === 'crash') return `<p class="crash"><b>${L(i)}:</b> CRASH! ${names(r.who)} collided. ${S.crashRule === 'freeze'
     ? `Nobody takes anything and ${L(i)} stays frozen.` : S.winners && !S.bagOut ? 'Nobody takes anything.' // a won round has no jettison
+    : c.noJettison ? 'Nobody takes anything. 🌊 Calm Seas: no jettisons.'
     : 'Nobody takes anything, and each of them jettisons 1 treasure.'}</p>`;
-  return `<p class="empty"><b>${L(i)}:</b> Nobody came. Now: ${tokens(r.after)}</p>`;
+  return `<p class="empty"><b>${L(i)}:</b> ${w.closed === i ? '⛈️ Closed by the Storm.' : 'Nobody came.'} Now: ${tokens(r.after)}</p>`;
 }
+// Under the results: what this round's weather did that the lines above don't say
+const weatherNote = h => {
+  const c = card(h.weather.key);
+  if (c.raidBonus && h.results.some(r => r.kind === 'raid') && !h.results.some(r => r.bonus)) return `<p class="muted">🎁 Treasure Tide: the bag couldn't give every lone raider 1, so nobody got one.</p>`;
+  if (c.noRefill && !S.winners) return `<p class="muted">😴 Doldrums: no new treasure this round.</p>`;
+  return '';
+};
 
 // The jettisons of a round, in one line, and a line for each crasher who had nothing to jettison
 function jettisonLines(h) {
@@ -124,18 +154,24 @@ const revealButton = () => S.jettisons ? '<button class="big" onclick="act.jetti
   : `<button class="big" onclick="act.next()">${S.winners ? 'See who won' : 'Next round'}</button>`;
 
 const views = {
+  weather: () => `<div class="wcard weather w-${S.weather.key}" style="display: block"><p>Round ${S.round} weather:</p>
+    <span class="icon">${weather().icon}</span><h2>${weather().name}!</h2><p>${news()}</p></div>
+    <button class="big" onclick="act.sail()">Set sail</button>`,
   pass: () => `<div class="cover"><p>Round ${S.round}: pass the device to</p><h2>${name(turn)}</h2>
     <p>Everyone else, look away!</p><button class="big" onclick="act.show()">I'm ${name(turn)}, show islands</button></div>`,
   pick: () => `<h2>${name(turn)}, choose an island</h2>
-    <div class="row">${S.islands.map((pile, i) => `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
+    <div class="row">${S.islands.map((pile, i) => S.weather.closed === i
+      ? `<button class="card" disabled style="opacity: 0.5"><b>${L(i)} ⛈️</b>${tokens(pile)}<br><span class="muted">closed</span></button>`
+      : `<button class="card ${sel === i ? 'sel' : ''}" onclick="act.choose(${i})"><b>${L(i)}</b>${tokens(pile)}</button>`).join('')}</div>
     <button class="big" ${sel === null ? 'disabled' : ''} onclick="act.lock()">Lock in${sel === null ? '' : ` Island ${L(sel)}`}</button>
     ${lastRound()}`,
   reveal: () => {
-    const h = S.history.at(-1), noStep = S.crashRule === 'jettison' && !S.jettisons && !h.jettisons && (!S.winners || S.bagOut);
+    const h = S.history.at(-1), noStep = S.crashRule === 'jettison' && !S.jettisons && !h.jettisons && (!S.winners || S.bagOut) && !card(h.weather.key).noJettison;
     return `<h2>Reveal!</h2>
     <p>${h.picks.map((isl, q) => `<b>${name(q)}</b> → ${isl === null ? 'no island' : L(isl)}`).join(' · ')}</p>
     ${h.results.map(resultLine).join('')}
     ${noStep ? jettisonLines(h) : ''}
+    ${S.jettisons ? '' : weatherNote(h)}
     ${bagOut()}
     ${revealButton()}`;
   },
@@ -151,6 +187,7 @@ const views = {
     <button class="big" ${ready ? '' : 'disabled'} onclick="act.jlock()">Lock in${ready ? ` ${RULES.treasure[jsel.colour].mark} → Island ${L(jsel.island)}` : ''}</button>`;
   },
   jreveal: () => `<h2>Jettisons revealed!</h2>${jettisonLines(S.history.at(-1))}
+    ${weatherNote(S.history.at(-1))}
     ${bagOut()}
     <button class="big" onclick="act.next()">${S.winners ? 'See who won' : 'Next round'}</button>`,
   end: () => {
@@ -160,11 +197,11 @@ const views = {
     ${S.bagOut ? `<p>The bag ran out, so the most of one colour won.</p>` : ''}
     <p>Rounds: <b>${S.history.length}</b> · Raids: <b>${all.filter(r => r.kind === 'raid').length}</b> ·
        Crashes: <b>${all.filter(r => r.kind === 'crash').length}</b> · Biggest island: <b>${S.maxIsland}</b> tokens</p>
-    <table><tr><th>Round</th>${S.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
-    ${S.history.map(h => `<tr><td>${h.round}</td>${h.picks.map((isl, q) => {
+    <table><tr><th>Round</th><th>Weather</th>${S.players.map((_, q) => `<th>${name(q)}</th>`).join('')}<th>Islands after</th></tr>
+    ${S.history.map(h => `<tr><td>${h.round}</td><td title="${card(h.weather.key).name}">${card(h.weather.key).icon}${h.weather.closed !== null ? ` ${L(h.weather.closed)}` : ''}</td>${h.picks.map((isl, q) => {
       const r = h.results[isl], j = h.jettisons?.[q];
       if (!r) return '<td>–</td>'; // skipped: no island
-      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}` : r.kind === 'crash' ? ` 💥${j ? ` ${RULES.treasure[j.colour].mark}→${L(j.island)}` : ''}` : ''}</td>`;
+      return `<td class="${r.kind}">${L(isl)}${r.kind === 'raid' ? ` +${letters(r.before)}${r.bonus ? `🎁${letters(r.bonus)}` : ''}` : r.kind === 'crash' ? ` 💥${j ? ` ${RULES.treasure[j.colour].mark}→${L(j.island)}` : ''}` : ''}</td>`;
     }).join('')}<td>${h.results.map((r, i) => `${L(i)}:${letters(r.after)}`).join(' ')}</td></tr>`).join('')}</table>
     <button class="big" onclick="act.again()">New game</button>`;
   },
