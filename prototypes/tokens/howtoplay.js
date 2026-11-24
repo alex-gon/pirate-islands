@@ -34,7 +34,10 @@
       <li>If the bag can't refill every island that's due one, the game ends: most of one colour wins.</li>
     </ul>
     <h3>This prototype</h3>
-    <p>Nothing new yet.</p>`, // Doubloons and skulls: its ticket replaces this with Alex's approved words (PI4 01). The Freeze card is unused
+    <p><b>This prototype: Doubloons and skulls.</b> The bag also holds 🪙 Doubloons and 💀 Skulls.<br>
+    🪙 <b>Doubloon</b>: counts as any colour you need, but only 2 count toward your 5.<br>
+    💀 <b>Skull</b>: raid a pile with a skull and the curse makes you jettison 1 treasure for each skull.
+    Then the skull is gone.</p>`, // Alex's approved words, word for word (PI4 05, 2026-11-23); they name PROTO's wildCap 2 and skullCost 1. The Freeze card is unused
     freeze: `<p><b>Be the first to collect 5 treasures of one colour.</b><br>Crash rule: <b>Freeze</b></p>
     <h3>A round</h3>
     <ol>
