@@ -159,6 +159,16 @@ when 2+ humans are seated.
   isn't connected is open. If every person seat has a stand-in, the room closes: its storage is deleted, every
   connection gets `room closed`, and its code names no room.
 
+## Prototypes
+
+`prototypes/` holds six forks of the hotseat for the v0.4 trial (a menu, `prototypes/index.html`, and one folder per
+idea), built from the vault's PI4 tickets (`Projects/Pirate Islands v0.4 Prototypes/PI4 Map.md`). Each folder is
+self-contained, its own copy of `index.html`, `rules.js`, `howtoplay.js` and `check.js`, playing Jettison only, and is
+never imported by the root game or `online/`. A fix to the root game is not carried into the forks, and the other way
+round. Each prototype has its own check, `node prototypes/<name>/check.js`, and its numbers in a `PROTO` block under
+`RULES`. "Never invent a rule" applies there too: a case its ticket doesn't settle goes to Alex, recorded in that
+ticket. `prototypes/README.md` says how to play them on phones.
+
 ## Where the planning lives
 
 Not here. Design and rules are in the Obsidian vault at `~/code/vault`:
